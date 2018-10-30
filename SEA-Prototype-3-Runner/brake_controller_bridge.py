@@ -1,13 +1,13 @@
 import time
 import asyncio
 from atlasbuggy import Node
-from arduino_factory import DeviceFactory, Arduino
+from arduino_factory import Arduino
 
 
 class BrakeControllerBridge(Node):
-    def __init__(self, enabled=True):
+    def __init__(self, factory, enabled=True):
         super(BrakeControllerBridge, self).__init__(enabled)
-        self.factory = DeviceFactory()
+        self.factory = factory
         self.brake_controller_bridge_arduino = Arduino("brake_controller", self.factory)
 
         self.prev_report_time = 0.0

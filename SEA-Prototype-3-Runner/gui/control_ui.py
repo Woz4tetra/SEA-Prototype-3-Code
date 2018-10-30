@@ -47,7 +47,8 @@ class TkinterGUI(Node):
         self.motor_controller_bridge_sub = self.define_subscription(
             self.motor_controller_bridge_tag,
             queue_size=None,
-            required_attributes=("set_speed",)
+            required_attributes=("set_speed",),
+            is_required=False
         )
         self.motor_controller_bridge = None
 
@@ -59,7 +60,8 @@ class TkinterGUI(Node):
 
     def take(self):
         self.brake_controller_bridge = self.brake_controller_bridge_sub.get_producer()
-        self.motor_controller_bridge = self.motor_controller_bridge_sub.get_producer()
+        if self.is_subscribed(self.motor_controller_bridge_tag):
+            self.motor_controller_bridge = self.motor_controller_bridge_sub.get_producer()
 
     def load_constants(self):
         if os.path.isfile(self.pickle_file_path):
@@ -88,13 +90,15 @@ class TkinterGUI(Node):
         self.save_constants()
 
     def set_motor(self):
-        self.motor_controller_bridge.set_speed(self.motor_speed_slider.get())
+        if self.is_subscribed(self.motor_controller_bridge_tag):
+            self.motor_controller_bridge.set_speed(self.motor_speed_slider.get())
 
     def set_brake(self):
         self.brake_controller_bridge.command_brake(self.brake_power_slider.get())
 
     def stop_motor(self):
-        self.motor_controller_bridge.set_speed(0)
+        if self.is_subscribed(self.motor_controller_bridge_tag):
+            self.motor_controller_bridge.set_speed(0)
 
     def stop_brake(self):
         self.brake_controller_bridge.command_brake(0)

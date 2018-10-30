@@ -8,7 +8,7 @@ class DataPlotter(Node):
     def __init__(self, enabled=True):
         super(DataPlotter, self).__init__(enabled)
 
-        self.pause_time = 1 / 30
+        self.pause_time = 1 / 60
         self.exit_event = Event()
         self.plot_paused = False
 
@@ -79,6 +79,7 @@ class DataPlotter(Node):
         self.abs_encoder_line_2 = self.encoder_plot.plot([], [], '.-', label="abs enc2")[0]
         self.rel_encoder_line_1 = self.encoder_plot.plot([], [], '.-', label="rel enc1")[0]
         self.rel_encoder_line_2 = self.encoder_plot.plot([], [], '.-', label="rel enc2")[0]
+        self.diff_plot.legend(fontsize="x-small", shadow="True", loc=0)
         self.encoder_plot.legend(fontsize="x-small", shadow="True", loc=0)
 
         self.brake_pin_value_plot = self.fig.add_subplot(2, 2, 3)
@@ -87,6 +88,7 @@ class DataPlotter(Node):
         self.brake_pin_value_line = self.brake_pin_value_plot.plot([], [], '-', label="pin value")[0]
         self.brake_current_line = self.brake_current_plot.plot([], [], '.-', label="current (mA)")[0]
         self.brake_current_setpoint = self.brake_current_plot.plot([], [], '.-', label="setpoint")[0]
+        self.brake_pin_value_plot.legend(fontsize="x-small", shadow="True", loc=0)
         self.brake_current_plot.legend(fontsize="x-small", shadow="True", loc=0)
 
         self.plt.ion()
@@ -184,8 +186,8 @@ class DataPlotter(Node):
 
                 abs_encoder_1 = message.data[0]
                 abs_encoder_2 = message.data[1]
-                rel_encoder_1 = message.data[2]
-                rel_encoder_2 = message.data[3]
+                rel_encoder_1 = message.data[4]
+                rel_encoder_2 = message.data[5]
 
                 if self.initial_val_enc_1 is None:
                     self.initial_val_enc_1 = abs_encoder_1
