@@ -21,7 +21,7 @@ class TkinterGUI(Node):
 
         self.is_running = True
 
-        self.motor_speed_slider = Scale(self.root, label="Motor speed", from_=-255, to=255, resolution=1, orient=HORIZONTAL, length=self.width)
+        self.motor_speed_slider = Scale(self.root, label="Motor speed", from_=-3200, to=3200, resolution=1, orient=HORIZONTAL, length=self.width)
         self.brake_power_slider = Scale(self.root, label="Brake power", from_=0.0, to=400.0, resolution=1.0, orient=HORIZONTAL, length=self.width)
 
         self.set_motor_button = Button(self.root, text="Set motor", command=self.set_motor)
@@ -43,16 +43,23 @@ class TkinterGUI(Node):
             queue_size=None,
             required_attributes=("command_brake", "set_kp", "set_ki", "set_kd")
         )
-        self.brake_controller_bridge = None
+        self.motor_controller_bridge_tag = "motor_controller_bridge"
+        self.motor_controller_bridge_sub = self.define_subscription(
+            self.motor_controller_bridge_tag,
+            queue_size=None,
+            required_attributes=("set_speed",)
+        )
+        self.motor_controller_bridge = None
 
         self.pickle_file_path = pickle_file_path
 
         self.kp = 30.0
-        self.ki = 30.0
-        self.kd = 30.0
+        self.ki = 0.0
+        self.kd = 0.0
 
     def take(self):
         self.brake_controller_bridge = self.brake_controller_bridge_sub.get_producer()
+        self.motor_controller_bridge = self.motor_controller_bridge_sub.get_producer()
 
     def load_constants(self):
         if os.path.isfile(self.pickle_file_path):
@@ -81,13 +88,13 @@ class TkinterGUI(Node):
         self.save_constants()
 
     def set_motor(self):
-        pass
+        self.motor_controller_bridge.set_speed(self.motor_speed_slider.get())
 
     def set_brake(self):
         self.brake_controller_bridge.command_brake(self.brake_power_slider.get())
 
     def stop_motor(self):
-        pass
+        self.motor_controller_bridge.set_speed(0)
 
     def stop_brake(self):
         self.brake_controller_bridge.command_brake(0)
