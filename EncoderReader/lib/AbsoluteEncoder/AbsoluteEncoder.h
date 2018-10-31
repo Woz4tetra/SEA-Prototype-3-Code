@@ -16,7 +16,7 @@ private:
 
     void read_into_curr_val()
     {
-        // TODO: find out why analogRead glitches and gives a random value sometimes
+        // TODO: find out why analogRead glitches and gives a random value sometimes (noise on the voltage bus?)
         if (is_reversed) {
             curr_enc_val = 1024 - analogRead(analog_pin);
         }
@@ -34,14 +34,19 @@ private:
 public:
     AbsoluteEncoder(int analog_pin, bool is_reversed = false, int encoder_min_val = ENCODER_MIN_VAL, int encoder_max_val = ENCODER_MAX_VAL) {
         this->analog_pin = analog_pin;
+        this->is_reversed = is_reversed;
+        this->encoder_min_val = encoder_min_val;
+        this->encoder_max_val = encoder_max_val;
+
+        reset();
+    };
+
+    void reset() {
         encoder_angle = 0.0;
         prev_enc_val = -1;
         curr_enc_val = -1;
         rotations = 0;
-        this->is_reversed = is_reversed;
-        this->encoder_min_val = encoder_min_val;
-        this->encoder_max_val = encoder_max_val;
-    };
+    }
 
     void begin() {
         pinMode(analog_pin, INPUT);

@@ -29,6 +29,13 @@ class TkinterGUI(Node):
         self.set_brake_button = Button(self.root, text="Set brake", command=self.set_brake)
         self.stop_brake_button = Button(self.root, text="Stop brake", command=self.stop_brake)
 
+        self.experiment_toggle_button_states = ["Start experiment", "Stop experiment"]
+        self.is_experiment_started = False
+        self.experiment_toggle_button = Button(
+            self.root, text=self.experiment_toggle_button_states[0],
+            command=self.toggle_experiment
+        )
+
         self.motor_speed_slider.pack()
         self.set_motor_button.pack()
         self.stop_motor_button.pack()
@@ -37,20 +44,31 @@ class TkinterGUI(Node):
         self.set_brake_button.pack()
         self.stop_brake_button.pack()
 
+        self.experiment_toggle_button.pack()
+
         self.brake_controller_bridge_tag = "brake_controller_bridge"
         self.brake_controller_bridge_sub = self.define_subscription(
             self.brake_controller_bridge_tag,
             queue_size=None,
-            required_attributes=("command_brake", "set_kp", "set_ki", "set_kd")
+            required_methods=("command_brake", "set_kp", "set_ki", "set_kd")
         )
+        self.brake_controller_bridge = None
+
         self.motor_controller_bridge_tag = "motor_controller_bridge"
         self.motor_controller_bridge_sub = self.define_subscription(
             self.motor_controller_bridge_tag,
             queue_size=None,
-            required_attributes=("set_speed",),
-            is_required=False
+            required_methods=("set_speed",)
         )
         self.motor_controller_bridge = None
+
+        self.experiment_tag = "experiment"
+        self.experiment_sub = self.define_subscription(
+            self.experiment_tag,
+            queue_size=None,
+            required_methods=("run_experiment", "cancel_experiment")
+        )
+        self.experiment = None
 
         self.pickle_file_path = pickle_file_path
 
@@ -60,8 +78,8 @@ class TkinterGUI(Node):
 
     def take(self):
         self.brake_controller_bridge = self.brake_controller_bridge_sub.get_producer()
-        if self.is_subscribed(self.motor_controller_bridge_tag):
-            self.motor_controller_bridge = self.motor_controller_bridge_sub.get_producer()
+        self.motor_controller_bridge = self.motor_controller_bridge_sub.get_producer()
+        self.experiment = self.experiment_sub.get_producer()
 
     def load_constants(self):
         if os.path.isfile(self.pickle_file_path):
@@ -102,6 +120,18 @@ class TkinterGUI(Node):
 
     def stop_brake(self):
         self.brake_controller_bridge.command_brake(0)
+
+    def toggle_experiment(self):
+        if self.is_experiment_started:
+            new_button_text = self.experiment_toggle_button_states[0]
+            self.experiment.cancel_experiment()
+        else:
+            new_button_text = self.experiment_toggle_button_states[1]
+            self.experiment.run_experiment()
+
+        self.is_experiment_started = not self.is_experiment_started
+
+        self.experiment_toggle_button["text"] = new_button_text
 
     def shutdown_tk(self):
         self.is_running = False

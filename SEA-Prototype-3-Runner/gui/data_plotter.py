@@ -27,12 +27,14 @@ class DataPlotter(Node):
         self.encoder_diff_timestamps = []
         self.abs_encoder_diff_data = []
         self.rel_encoder_diff_data = []
+        # self.motor_encoder_diff_data = []
 
         self.encoder_timestamps = []
         self.abs_encoder_data_1 = []
         self.abs_encoder_data_2 = []
         self.rel_encoder_data_1 = []
         self.rel_encoder_data_2 = []
+        self.motor_encoder_data = []
 
         self.initial_val_enc_1 = None
         self.initial_val_enc_2 = None
@@ -75,10 +77,12 @@ class DataPlotter(Node):
 
         self.abs_diff_line = self.diff_plot.plot([], [], '-', label="abs diff")[0]
         self.rel_diff_line = self.diff_plot.plot([], [], '-', label="rel diff")[0]
+        # self.motor_diff_line = self.diff_plot.plot([], [], '-', label="motor diff")[0]
         self.abs_encoder_line_1 = self.encoder_plot.plot([], [], '.-', label="abs enc1")[0]
         self.abs_encoder_line_2 = self.encoder_plot.plot([], [], '.-', label="abs enc2")[0]
         self.rel_encoder_line_1 = self.encoder_plot.plot([], [], '.-', label="rel enc1")[0]
         self.rel_encoder_line_2 = self.encoder_plot.plot([], [], '.-', label="rel enc2")[0]
+        self.motor_encoder_line = self.encoder_plot.plot([], [], '.-', label="motor")[0]
         self.diff_plot.legend(fontsize="x-small", shadow="True", loc=0)
         self.encoder_plot.legend(fontsize="x-small", shadow="True", loc=0)
 
@@ -114,6 +118,7 @@ class DataPlotter(Node):
                     self.encoder_diff_timestamps.pop(0)
                     self.abs_encoder_diff_data.pop(0)
                     self.rel_encoder_diff_data.pop(0)
+                    # self.motor_encoder_diff_data.pop(0)
 
                 while self.encoder_timestamps[-1] - self.encoder_timestamps[0] > self.enc_plot_time_window:
                     self.encoder_timestamps.pop(0)
@@ -121,6 +126,7 @@ class DataPlotter(Node):
                     self.abs_encoder_data_2.pop(0)
                     self.rel_encoder_data_1.pop(0)
                     self.rel_encoder_data_2.pop(0)
+                    self.motor_encoder_data.pop(0)
 
             if self.is_subscribed(self.brake_controller_bridge_tag):
                 if len(self.brake_timestamps) == 0:
@@ -150,11 +156,17 @@ class DataPlotter(Node):
             self.rel_encoder_line_2.set_xdata(self.encoder_timestamps)
             self.rel_encoder_line_2.set_ydata(self.rel_encoder_data_2)
 
+            self.motor_encoder_line.set_xdata(self.encoder_timestamps)
+            self.motor_encoder_line.set_ydata(self.motor_encoder_data)
+
             self.abs_diff_line.set_xdata(self.encoder_diff_timestamps)
             self.abs_diff_line.set_ydata(self.abs_encoder_diff_data)
 
             self.rel_diff_line.set_xdata(self.encoder_diff_timestamps)
             self.rel_diff_line.set_ydata(self.rel_encoder_diff_data)
+
+            # self.motor_diff_line.set_xdata(self.encoder_diff_timestamps)
+            # self.motor_diff_line.set_ydata(self.motor_encoder_diff_data)
 
             self.encoder_plot.relim()
             self.encoder_plot.autoscale_view()
@@ -188,6 +200,7 @@ class DataPlotter(Node):
                 abs_encoder_2 = message.data[1]
                 rel_encoder_1 = message.data[4]
                 rel_encoder_2 = message.data[5]
+                motor_encoder = message.data[6]
 
                 if self.initial_val_enc_1 is None:
                     self.initial_val_enc_1 = abs_encoder_1
@@ -205,10 +218,12 @@ class DataPlotter(Node):
                 self.encoder_diff_timestamps.append(message.timestamp)
                 self.abs_encoder_diff_data.append(abs_enc1_angle - abs_enc2_angle)
                 self.rel_encoder_diff_data.append(rel_encoder_1 - rel_encoder_2)
+                # self.motor_encoder_diff_data.append(rel_encoder_2 - motor_encoder)
                 self.abs_encoder_data_1.append(abs_enc1_angle)
                 self.abs_encoder_data_2.append(abs_enc2_angle)
                 self.rel_encoder_data_1.append(rel_encoder_1)
                 self.rel_encoder_data_2.append(rel_encoder_2)
+                self.motor_encoder_data.append(motor_encoder)
 
     def get_brake_data(self):
         if self.is_subscribed(self.brake_controller_bridge_tag):
