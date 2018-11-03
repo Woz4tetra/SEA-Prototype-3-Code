@@ -35,6 +35,8 @@ class TkinterGUI(Node):
             self.root, text=self.experiment_toggle_button_states[0],
             command=self.toggle_experiment
         )
+        self.take_sample_slider = Scale(self.root, label="Sample length (s)", from_=0.0, to=30.0, resolution=1.0, orient=HORIZONTAL, length=self.width)
+        self.take_sample_button = Button(self.root, text="take sample", command=self.take_sample)
 
         self.motor_speed_slider.pack()
         self.set_motor_button.pack()
@@ -45,6 +47,9 @@ class TkinterGUI(Node):
         self.stop_brake_button.pack()
 
         self.experiment_toggle_button.pack()
+
+        self.take_sample_slider.pack()
+        self.take_sample_button.pack()
 
         self.brake_controller_bridge_tag = "brake_controller_bridge"
         self.brake_controller_bridge_sub = self.define_subscription(
@@ -66,7 +71,7 @@ class TkinterGUI(Node):
         self.experiment_sub = self.define_subscription(
             self.experiment_tag,
             queue_size=None,
-            required_methods=("run_experiment", "cancel_experiment")
+            required_methods=("run_experiment", "cancel_experiment", "take_sample")
         )
         self.experiment = None
 
@@ -132,6 +137,9 @@ class TkinterGUI(Node):
         self.is_experiment_started = not self.is_experiment_started
 
         self.experiment_toggle_button["text"] = new_button_text
+
+    def take_sample(self):
+        self.experiment.take_sample(self.take_sample_slider.get())
 
     def shutdown_tk(self):
         self.is_running = False

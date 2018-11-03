@@ -1,7 +1,67 @@
 import asyncio
 from threading import Event
-
 from atlasbuggy import Node
+
+from experiment_helpers import *
+
+
+class LineArgsContainer:
+    def __init__(self, name, *plot_args, enabled=True, **plot_kwargs):
+        self.name = name
+        self.enabled = enabled
+        self.args = plot_args
+        self.kwargs = plot_kwargs
+
+
+class PlotContainer:
+    def __init__(self, name, plot, *line_arg_containers, x_data_window=0.0, enabled=True):
+        self.name = name
+        self.enabled = enabled
+        self.x_data = []
+        self.y_data = {}
+        self.plot = plot
+        self.lines = {}
+        self.x_data_window = x_data_window
+        self.disabled_lines = set()
+
+        for line_args_container in line_arg_containers:
+            name = line_args_container.name
+            if line_args_container.enabled:
+                args = line_args_container.args
+                kwargs = line_args_container.kwargs
+
+                self.y_data[name] = []
+                self.lines[name] = self.plot.plot([], [], *args, **kwargs)[0]
+            else:
+                self.disabled_lines.add(name)
+
+        if len(self.y_data) == 0:
+            self.enabled = False
+
+    def append_x(self, datum):
+        if self.enabled:
+            self.x_data.append(datum)
+
+    def append_y(self, line_name, datum):
+        if line_name in self.disabled_lines:
+            return
+
+        if self.enabled:
+            self.y_data[line_name].append(datum)
+
+    def update_lines(self):
+        if not self.enabled:
+            return
+
+        if self.x_data_window > 0.0:
+            while self.x_data[-1] - self.x_data[0] > self.x_data_window:
+                self.x_data.pop(0)
+                for y_data_line in self.y_data.values():
+                    y_data_line.pop(0)
+
+        for line_name, line_plot in self.lines.items():
+            line_plot.set_xdata(self.x_data)
+            line_plot.set_ydata(self.y_data[line_name])
 
 
 class DataPlotter(Node):
@@ -13,38 +73,24 @@ class DataPlotter(Node):
         self.plot_paused = False
 
         self.encoder_reader_bridge_tag = "encoder_reader_bridge"
-        self.encoder_reader_bridge_sub = self.define_subscription(self.encoder_reader_bridge_tag, is_required=False, queue_size=5)
+        self.encoder_reader_bridge_sub = self.define_subscription(self.encoder_reader_bridge_tag, queue_size=5)
         self.encoder_reader_bridge_queue = None
 
         self.brake_controller_bridge_tag = "brake_controller_bridge"
-        self.brake_controller_bridge_sub = self.define_subscription(self.brake_controller_bridge_tag, is_required=False, queue_size=5)
+        self.brake_controller_bridge_sub = self.define_subscription(self.brake_controller_bridge_tag, queue_size=5)
         self.brake_controller_bridge_queue = None
 
-        self.diff_plot_time_window = 120.0
-        self.enc_plot_time_window = 5.0
-        self.brake_plot_time_window = 5.0
-
-        self.encoder_diff_timestamps = []
-        self.abs_encoder_diff_data = []
-        self.rel_encoder_diff_data = []
-        # self.motor_encoder_diff_data = []
-
-        self.encoder_timestamps = []
-        self.abs_encoder_data_1 = []
-        self.abs_encoder_data_2 = []
-        self.rel_encoder_data_1 = []
-        self.rel_encoder_data_2 = []
-        self.motor_encoder_data = []
+        self.diff_plot_container = None
+        self.encoder_plot_container = None
+        self.brake_pin_plot_container = None
+        self.brake_current_plot_container = None
 
         self.initial_val_enc_1 = None
         self.initial_val_enc_2 = None
 
-        # self.gear_ratio = 48.0 / 32.0
-
-        self.brake_timestamps = []
-        self.brake_pin_value_data = []
-        self.brake_current_mA_data = []
-        self.brake_setpoint_data = []
+        self.rel_enc_ticks_to_rad = default_rel_enc_ticks_to_rad
+        self.motor_enc_ticks_to_rad = default_motor_enc_ticks_to_rad
+        self.abs_gear_ratio = default_abs_gear_ratio
 
         self.plt = None
         if self.enabled:
@@ -58,40 +104,45 @@ class DataPlotter(Node):
         self.plt = plt
 
     def take(self):
-        if self.is_subscribed(self.encoder_reader_bridge_tag):
-            self.encoder_reader_bridge_queue = self.encoder_reader_bridge_sub.get_queue()
-        if self.is_subscribed(self.brake_controller_bridge_tag):
-            self.brake_controller_bridge_queue = self.brake_controller_bridge_sub.get_queue()
+        self.encoder_reader_bridge_queue = self.encoder_reader_bridge_sub.get_queue()
+        self.brake_controller_bridge_queue = self.brake_controller_bridge_sub.get_queue()
 
     async def setup(self):
-        # if self.is_subscribed(self.bno055_tag):
-        #     self.bno_plot = self.fig.add_subplot(2, 1, 1)
-        #     self.bno_data_line = self.bno_plot.plot([], [], '-', label="angle")[0]
-        #
-        #     self.speed_plot = self.fig.add_subplot(2, 1, 2)
-        #
-        #     self.bno_plot.legend(fontsize="x-small", shadow="True", loc=0)
-        # else:
         self.diff_plot = self.fig.add_subplot(2, 2, 1)
         self.encoder_plot = self.fig.add_subplot(2, 2, 2)
-
-        self.abs_diff_line = self.diff_plot.plot([], [], '-', label="abs diff")[0]
-        self.rel_diff_line = self.diff_plot.plot([], [], '-', label="rel diff")[0]
-        # self.motor_diff_line = self.diff_plot.plot([], [], '-', label="motor diff")[0]
-        self.abs_encoder_line_1 = self.encoder_plot.plot([], [], '.-', label="abs enc1")[0]
-        self.abs_encoder_line_2 = self.encoder_plot.plot([], [], '.-', label="abs enc2")[0]
-        self.rel_encoder_line_1 = self.encoder_plot.plot([], [], '.-', label="rel enc1")[0]
-        self.rel_encoder_line_2 = self.encoder_plot.plot([], [], '.-', label="rel enc2")[0]
-        self.motor_encoder_line = self.encoder_plot.plot([], [], '.-', label="motor")[0]
-        self.diff_plot.legend(fontsize="x-small", shadow="True", loc=0)
-        self.encoder_plot.legend(fontsize="x-small", shadow="True", loc=0)
-
         self.brake_pin_value_plot = self.fig.add_subplot(2, 2, 3)
         self.brake_current_plot = self.fig.add_subplot(2, 2, 4)
 
-        self.brake_pin_value_line = self.brake_pin_value_plot.plot([], [], '-', label="pin value")[0]
-        self.brake_current_line = self.brake_current_plot.plot([], [], '.-', label="current (mA)")[0]
-        self.brake_current_setpoint = self.brake_current_plot.plot([], [], '.-', label="setpoint")[0]
+        self.diff_plot_container = PlotContainer(
+            "diff", self.diff_plot,
+            LineArgsContainer("abs", '-', enabled=False, label="abs diff"),
+            LineArgsContainer("rel", '-', enabled=True, label="rel diff"),
+            LineArgsContainer("motor", '-', enabled=False, label="motor diff"),
+            x_data_window = 120.0
+        )
+        self.encoder_plot_container = PlotContainer(
+            "encoder", self.encoder_plot,
+            LineArgsContainer("abs enc 1", '.-', enabled=False, label="abs enc1"),
+            LineArgsContainer("abs enc 2", '.-', enabled=False, label="abs enc2"),
+            LineArgsContainer("rel enc 1", '.-', enabled=True, label="rel enc1"),
+            LineArgsContainer("rel enc 2", '.-', enabled=True, label="rel enc2"),
+            LineArgsContainer("motor", '.-', enabled=True, label="motor"),
+            x_data_window = 10.0
+        )
+
+        self.brake_pin_plot_container = PlotContainer(
+            "brake pin", self.brake_pin_value_plot,
+            LineArgsContainer("pin", '-', enabled=True, label="pin value"),
+
+        )
+        self.brake_current_plot_container = PlotContainer(
+            "brake current", self.brake_current_plot,
+            LineArgsContainer("current", '.-', enabled=True, label="current (mA)"),
+            LineArgsContainer("setpoint", '.-', enabled=True, label="setpoint"),
+        )
+
+        self.diff_plot.legend(fontsize="x-small", shadow="True", loc=0)
+        self.encoder_plot.legend(fontsize="x-small", shadow="True", loc=0)
         self.brake_pin_value_plot.legend(fontsize="x-small", shadow="True", loc=0)
         self.brake_current_plot.legend(fontsize="x-small", shadow="True", loc=0)
 
@@ -107,66 +158,17 @@ class DataPlotter(Node):
                 await self.draw()
                 continue
 
-            self.get_encoder_data()
-            self.get_brake_data()
-            if self.is_subscribed(self.encoder_reader_bridge_tag):
-                if len(self.encoder_diff_timestamps) == 0:
-                    await self.draw()
-                    continue
+            await self.get_encoder_data()
+            await self.get_brake_data()
 
-                while self.encoder_diff_timestamps[-1] - self.encoder_diff_timestamps[0] > self.diff_plot_time_window:
-                    self.encoder_diff_timestamps.pop(0)
-                    self.abs_encoder_diff_data.pop(0)
-                    self.rel_encoder_diff_data.pop(0)
-                    # self.motor_encoder_diff_data.pop(0)
+            if len(self.diff_plot_container.x_data) == 0 and len(self.brake_current_plot_container.x_data) == 0:
+                await self.draw()
+                continue
 
-                while self.encoder_timestamps[-1] - self.encoder_timestamps[0] > self.enc_plot_time_window:
-                    self.encoder_timestamps.pop(0)
-                    self.abs_encoder_data_1.pop(0)
-                    self.abs_encoder_data_2.pop(0)
-                    self.rel_encoder_data_1.pop(0)
-                    self.rel_encoder_data_2.pop(0)
-                    self.motor_encoder_data.pop(0)
-
-            if self.is_subscribed(self.brake_controller_bridge_tag):
-                if len(self.brake_timestamps) == 0:
-                    await self.draw()
-                    continue
-
-                while self.brake_timestamps[-1] - self.brake_timestamps[0] > self.brake_plot_time_window:
-                    self.brake_timestamps.pop(0)
-                    self.brake_current_mA_data.pop(0)
-                    self.brake_pin_value_data.pop(0)
-                    self.brake_setpoint_data.pop(0)
-
-            self.plot_data()
-            await self.draw()
-
-    def plot_data(self):
-        if self.is_subscribed(self.encoder_reader_bridge_tag):
-            self.abs_encoder_line_1.set_xdata(self.encoder_timestamps)
-            self.abs_encoder_line_1.set_ydata(self.abs_encoder_data_1)
-
-            self.abs_encoder_line_2.set_xdata(self.encoder_timestamps)
-            self.abs_encoder_line_2.set_ydata(self.abs_encoder_data_2)
-
-            self.rel_encoder_line_1.set_xdata(self.encoder_timestamps)
-            self.rel_encoder_line_1.set_ydata(self.rel_encoder_data_1)
-
-            self.rel_encoder_line_2.set_xdata(self.encoder_timestamps)
-            self.rel_encoder_line_2.set_ydata(self.rel_encoder_data_2)
-
-            self.motor_encoder_line.set_xdata(self.encoder_timestamps)
-            self.motor_encoder_line.set_ydata(self.motor_encoder_data)
-
-            self.abs_diff_line.set_xdata(self.encoder_diff_timestamps)
-            self.abs_diff_line.set_ydata(self.abs_encoder_diff_data)
-
-            self.rel_diff_line.set_xdata(self.encoder_diff_timestamps)
-            self.rel_diff_line.set_ydata(self.rel_encoder_diff_data)
-
-            # self.motor_diff_line.set_xdata(self.encoder_diff_timestamps)
-            # self.motor_diff_line.set_ydata(self.motor_encoder_diff_data)
+            self.diff_plot_container.update_lines()
+            self.encoder_plot_container.update_lines()
+            self.brake_pin_plot_container.update_lines()
+            self.brake_current_plot_container.update_lines()
 
             self.encoder_plot.relim()
             self.encoder_plot.autoscale_view()
@@ -174,69 +176,71 @@ class DataPlotter(Node):
             self.diff_plot.relim()
             self.diff_plot.autoscale_view()
 
-        if self.is_subscribed(self.brake_controller_bridge_tag):
-            self.brake_pin_value_line.set_xdata(self.brake_timestamps)
-            self.brake_pin_value_line.set_ydata(self.brake_pin_value_data)
-
-            self.brake_current_line.set_xdata(self.brake_timestamps)
-            self.brake_current_line.set_ydata(self.brake_current_mA_data)
-
-            self.brake_current_setpoint.set_xdata(self.brake_timestamps)
-            self.brake_current_setpoint.set_ydata(self.brake_setpoint_data)
-
             self.brake_pin_value_plot.relim()
             self.brake_pin_value_plot.autoscale_view()
 
             self.brake_current_plot.relim()
             self.brake_current_plot.autoscale_view()
 
-    def get_encoder_data(self):
-        if self.is_subscribed(self.encoder_reader_bridge_tag):
+            await self.draw()
+
+    async def get_encoder_data(self):
+        message = None
+        if not self.encoder_reader_bridge_queue.empty():
             while not self.encoder_reader_bridge_queue.empty():
                 # message = await asyncio.wait_for(self.brake_controller_bridge_queue.get(), timeout=1)
-                message = self.encoder_reader_bridge_queue.get_nowait()
+                message = await self.encoder_reader_bridge_queue.get()
+        else:
+            return
 
-                abs_encoder_1 = message.data[0]
-                abs_encoder_2 = message.data[1]
-                rel_encoder_1 = message.data[4]
-                rel_encoder_2 = message.data[5]
-                motor_encoder = message.data[6]
+        abs_encoder_1 = message.data[0] * math.pi / 180 * self.abs_gear_ratio
+        abs_encoder_2 = message.data[1] * math.pi / 180 * self.abs_gear_ratio
+        rel_encoder_1 = message.data[4] * self.rel_enc_ticks_to_rad
+        rel_encoder_2 = message.data[5] * self.rel_enc_ticks_to_rad
+        motor_encoder = message.data[6] * self.motor_enc_ticks_to_rad
 
-                if self.initial_val_enc_1 is None:
-                    self.initial_val_enc_1 = abs_encoder_1
+        if self.initial_val_enc_1 is None:
+            self.initial_val_enc_1 = abs_encoder_1
 
-                if self.initial_val_enc_2 is None:
-                    self.initial_val_enc_2 = abs_encoder_2
+        if self.initial_val_enc_2 is None:
+            self.initial_val_enc_2 = abs_encoder_2
 
-                abs_enc1_angle = (abs_encoder_1 - self.initial_val_enc_1)
-                abs_enc2_angle = (abs_encoder_2 - self.initial_val_enc_2)
+        abs_enc1_angle = (abs_encoder_1 - self.initial_val_enc_1)
+        abs_enc2_angle = (abs_encoder_2 - self.initial_val_enc_2)
 
-                # enc1_angle = message.data[0] * self.gear_ratio
-                # enc2_angle = message.data[1] * self.gear_ratio
+        # enc1_angle = message.data[0] * self.gear_ratio
+        # enc2_angle = message.data[1] * self.gear_ratio
 
-                self.encoder_timestamps.append(message.timestamp)
-                self.encoder_diff_timestamps.append(message.timestamp)
-                self.abs_encoder_diff_data.append(abs_enc1_angle - abs_enc2_angle)
-                self.rel_encoder_diff_data.append(rel_encoder_1 - rel_encoder_2)
-                # self.motor_encoder_diff_data.append(rel_encoder_2 - motor_encoder)
-                self.abs_encoder_data_1.append(abs_enc1_angle)
-                self.abs_encoder_data_2.append(abs_enc2_angle)
-                self.rel_encoder_data_1.append(rel_encoder_1)
-                self.rel_encoder_data_2.append(rel_encoder_2)
-                self.motor_encoder_data.append(motor_encoder)
+        self.encoder_plot_container.append_x(message.timestamp)
+        self.encoder_plot_container.append_y("abs enc 1", abs_enc1_angle)
+        self.encoder_plot_container.append_y("abs enc 2", abs_enc2_angle)
+        self.encoder_plot_container.append_y("rel enc 1", rel_encoder_1)
+        self.encoder_plot_container.append_y("rel enc 2", rel_encoder_2)
+        self.encoder_plot_container.append_y("motor", motor_encoder)
 
-    def get_brake_data(self):
-        if self.is_subscribed(self.brake_controller_bridge_tag):
+        self.diff_plot_container.append_x(message.timestamp)
+        self.diff_plot_container.append_y("abs", abs_enc1_angle - abs_enc2_angle)
+        self.diff_plot_container.append_y("rel", abs_enc1_angle - abs_enc2_angle)
+        self.diff_plot_container.append_y("motor", rel_encoder_2 - motor_encoder)
+
+    async def get_brake_data(self):
+        message = None
+        if not self.brake_controller_bridge_queue.empty():
             while not self.brake_controller_bridge_queue.empty():
-                message = self.brake_controller_bridge_queue.get_nowait()
-                current_mA = message.data[2]
-                pin_value = message.data[5]
-                set_point = message.data[6]
+                message = await self.brake_controller_bridge_queue.get()
+        else:
+            return
 
-                self.brake_timestamps.append(message.timestamp)
-                self.brake_current_mA_data.append(current_mA)
-                self.brake_pin_value_data.append(pin_value)
-                self.brake_setpoint_data.append(set_point)
+        current_mA = message.data[2]
+        pin_value = message.data[5]
+        setpoint = message.data[6]
+
+        self.brake_pin_plot_container.append_x(message.timestamp)
+        self.brake_pin_plot_container.append_y("pin", pin_value)
+
+        self.brake_current_plot_container.append_x(message.timestamp)
+        self.brake_current_plot_container.append_y("current", current_mA)
+        self.brake_current_plot_container.append_y("setpoint", setpoint)
 
     def press(self, event):
         """matplotlib key press event. Close all figures when q is pressed"""

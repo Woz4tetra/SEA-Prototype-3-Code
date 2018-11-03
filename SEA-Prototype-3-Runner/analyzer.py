@@ -2,7 +2,6 @@ import os
 import time
 import math
 import asyncio
-import peakutils
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -204,50 +203,13 @@ class DataAggregator(Node):
 
 
     async def teardown(self):
-        rel_enc_ticks_to_rad = 2 * math.pi / 2000
-
-        encoder_timestamps = np.array(self.encoder_timestamps)
-        encoder_1_ticks = np.array(self.encoder_1_ticks)
-        encoder_2_ticks = np.array(self.encoder_2_ticks)
-        brake_timestamps = np.array(self.brake_timestamps)
-        brake_current = np.array(self.brake_current)
-
-        brake_ramp_transitions = peakutils.indexes(brake_current, thres=0.9, min_dist=500)
-        motor_direction_switch_brake_index = (np.abs(brake_timestamps - self.motor_direction_switch_time)).argmin()
-        assert len(brake_ramp_transitions) == 2, len(brake_ramp_transitions)
-        assert motor_direction_switch_brake_index > brake_ramp_transitions[0], motor_direction_switch_brake_index
-
-        encoder_delta = (encoder_1_ticks - encoder_2_ticks) * rel_enc_ticks_to_rad
-        encoder_interp_delta = []
-
-        interp_enc_index = 0
-        for brake_t in brake_timestamps:
-            # Encoder samples ~5 times faster than the brake's current feedback. Interpolate encoder values to brake timestamps
-            while encoder_timestamps[interp_enc_index] < brake_t:
-                interp_enc_index += 1
-                if interp_enc_index >= len(encoder_timestamps):
-                    interp_enc_index -= 1
-                    break
-            enc_index = interp_enc_index
-
-            encoder_interp_delta.append(encoder_delta[enc_index])
-
-
-        # convert sensed current to torque (Nm)
-        brake_current_forcing_forward = brake_current[0:brake_ramp_transitions[0]]
-        brake_current_unforcing_forward = brake_current[brake_ramp_transitions[0]:motor_direction_switch_brake_index]
-        brake_current_forcing_backward = brake_current[motor_direction_switch_brake_index:brake_ramp_transitions[1]]
-        brake_current_unforcing_backward = brake_current[brake_ramp_transitions[1]:]
-
-        btff = self.torque_table.to_torque(True, brake_current_forcing_forward)
-        btuf = self.torque_table.to_torque(False, brake_current_unforcing_forward)
-        btfb = -self.torque_table.to_torque(True, brake_current_forcing_backward)
-        btub = -self.torque_table.to_torque(False, brake_current_unforcing_backward)
-        brake_torque_nm = np.concatenate((btff, btuf, btfb, btub))
-
-        polynomial = np.polyfit(encoder_interp_delta, brake_torque_nm, 1)
-        linear_regression_fn = np.poly1d(polynomial)
-        encoder_lin_reg = linear_regression_fn(encoder_interp_delta)
+        encoder_timestamps, encoder_delta, encoder_interp_delta, encoder_lin_reg, \
+            brake_timestamps, brake_current, brake_ramp_transitions, brake_torque_nm, polynomial = compute_k(
+            self.torque_table,
+            self.encoder_timestamps, self.encoder_1_ticks, self.encoder_2_ticks,
+            self.brake_timestamps, self.brake_current,
+            self.motor_direction_switch_time
+        )
 
         new_fig()
         plt.title("Raw Encoder Data")

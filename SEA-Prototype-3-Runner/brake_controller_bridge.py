@@ -5,7 +5,7 @@ from arduino_factory import Arduino
 
 
 class BrakeControllerBridge(Node):
-    def __init__(self, factory, enabled=True):
+    def __init__(self, factory, enabled=True, enable_reporting=True):
         self.set_logger(write=True)
         super(BrakeControllerBridge, self).__init__(enabled)
         self.factory = factory
@@ -13,6 +13,7 @@ class BrakeControllerBridge(Node):
 
         self.prev_broadcast_time = 0.0
         self.prev_report_time = 0.0
+        self.enable_reporting = enable_reporting
 
         self.kp = 0.0
         self.ki = 0.0
@@ -48,21 +49,21 @@ class BrakeControllerBridge(Node):
                 # set_point = packet.data[6]
                 self.log_to_buffer(packet.receive_time, packet)
 
-                if time.time() - self.prev_broadcast_time > 0.25:
-                    if time.time() - self.prev_report_time > 1.0:
-                        try:
-                            print("shunt voltage (V): %0.2f\n"
-                                  "bus voltage (V): %0.2f\n"
-                                  "current (mA): %0.2f\n"
-                                  "power (mW): %0.2f\n"
-                                  "load voltage (V): %0.2f\n"
-                                  "pwm pin value: %s\n"
-                                  "set point (mA): %0.2f\n" % tuple(packet.data))
-                        except TypeError as error:
-                            print("The brake controller bridge encountered a formatting error while reporting values:")
-                            print(error)
-                        self.prev_report_time = time.time()
-                    self.prev_broadcast_time = time.time()
+                # if time.time() - self.prev_broadcast_time > 0.25:
+                if self.enable_reporting and time.time() - self.prev_report_time > 1.0:
+                    try:
+                        print("shunt voltage (V): %0.2f\n"
+                              "bus voltage (V): %0.2f\n"
+                              "current (mA): %0.2f\n"
+                              "power (mW): %0.2f\n"
+                              "load voltage (V): %0.2f\n"
+                              "pwm pin value: %s\n"
+                              "set point (mA): %0.2f\n" % tuple(packet.data))
+                    except TypeError as error:
+                        print("The brake controller bridge encountered a formatting error while reporting values:")
+                        print(error)
+                    self.prev_report_time = time.time()
+                self.prev_broadcast_time = time.time()
 
                 await self.broadcast(packet)
 

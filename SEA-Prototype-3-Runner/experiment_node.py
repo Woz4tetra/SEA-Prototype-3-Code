@@ -1,4 +1,6 @@
 import time
+import asyncio
+import numpy as np
 from atlasbuggy import Node
 
 from experiment_helpers import *
@@ -13,7 +15,8 @@ class ExperimentNode(Node):
             queue_size=None,
             required_methods=("command_brake",)
         )
-        self.brake_controller_bridge_queue = None
+        self.brake_controller_bridge = None
+        # self.brake_controller_bridge_queue = None
 
         self.motor_controller_bridge_tag = "motor_controller_bridge"
         self.motor_controller_bridge_sub = self.define_subscription(
@@ -23,6 +26,10 @@ class ExperimentNode(Node):
         )
         self.motor_controller_bridge = None
 
+        self.encoder_reader_bridge_tag = "encoder_reader_bridge"
+        self.encoder_reader_bridge_sub = self.define_subscription(self.encoder_reader_bridge_tag, queue_size=5)
+        self.encoder_reader_bridge_queue = None
+
         self.torque_table = TorqueTable(torque_table_path)
         self.min_torque_forcing = self.torque_table.to_torque(True, min_current_mA)
         self.min_torque_unforcing = self.torque_table.to_torque(False, min_current_mA)
@@ -31,6 +38,9 @@ class ExperimentNode(Node):
         self.experiment_num_steps = num_steps
 
         self.experiment_time = time.time()
+
+        self.taking_sample_lock = asyncio.Event()
+        self.sample_duration = 0.0
 
         self.logger.info(
             "Experiment:\n"
@@ -53,7 +63,11 @@ class ExperimentNode(Node):
 
     def take(self):
         self.brake_controller_bridge = self.brake_controller_bridge_sub.get_producer()
+        # self.brake_controller_bridge_queue = self.brake_controller_bridge_sub.get_queue()
         self.motor_controller_bridge = self.motor_controller_bridge_sub.get_producer()
+        self.encoder_reader_bridge_queue = self.encoder_reader_bridge_sub.get_queue()
+        # self.brake_controller_bridge_sub.enabled = False
+        self.encoder_reader_bridge_sub.enabled = False
 
     def run_experiment(self):
         self.experiment_time = time.time()
@@ -82,6 +96,78 @@ class ExperimentNode(Node):
 
         self.motor_controller_bridge.set_speed(0)
         self.brake_controller_bridge.command_brake(0)
+
+    def take_sample(self, length_sec):
+        self.taking_sample_lock.set()
+        self.encoder_reader_bridge_sub.enabled = True
+        # self.brake_controller_bridge_sub.enabled = True
+        self.sample_duration = length_sec
+
+    async def loop(self):
+        while True:
+            await self.taking_sample_lock.wait()
+
+            # encoder_timestamps = []
+            encoder_1_ticks = []
+            encoder_2_ticks = []
+            # brake_timestamps = []
+            # brake_current = []
+
+            sample_start_time = time.time()
+            while time.time() - sample_start_time < self.sample_duration:
+                while not self.encoder_reader_bridge_queue.empty():
+                    message = await self.encoder_reader_bridge_queue.get()
+
+                    # encoder_timestamps.append(message.timestamp)
+                    encoder_1_ticks.append(message.data[4])
+                    encoder_2_ticks.append(message.data[5])
+                await asyncio.sleep(0.0)
+
+                # while not self.brake_controller_bridge_queue.empty():
+                #     message = await self.brake_controller_bridge_queue.get()
+                #     brake_timestamps.append(message.timestamp)
+                #     brake_current.append(message.data[2])
+
+            # encoder_timestamps = np.array(encoder_timestamps)
+            encoder_1_ticks = np.array(encoder_1_ticks)
+            encoder_2_ticks = np.array(encoder_2_ticks)
+            encoder_delta = encoder_1_ticks - encoder_2_ticks
+            # brake_timestamps = np.array(brake_timestamps)
+            # brake_current = np.array(brake_current)
+            #
+            # encoder_interp_delta = interpolate_encoder_values(
+            #     encoder_timestamps, encoder_1_ticks, encoder_2_ticks,
+            #     default_rel_enc_ticks_to_rad, brake_timestamps
+            # )
+            # brake_torque_forcing_nm = self.torque_table.to_torque(True, brake_current)
+            # brake_torque_unforcing_nm = self.torque_table.to_torque(False, brake_current)
+            #
+            encoder_delta_rad_avg = np.mean(encoder_delta) * default_rel_enc_ticks_to_rad
+            # brake_torque_forcing_nm_avg = np.mean(brake_torque_forcing_nm)
+            # brake_torque_unforcing_nm_avg = np.mean(brake_torque_unforcing_nm)
+            #
+            # k_forced = brake_torque_forcing_nm_avg / encoder_delta_rad_avg
+            # k_unforced = brake_torque_unforcing_nm_avg / encoder_delta_rad_avg
+            #
+            # print(
+            #     "Sample results:\n"
+            #     "\tDisplacement (rad): %s\n"
+            #     "\tTorque, forced (N): %s\n"
+            #     "\tTorque, unforced (N): %s\n"
+            #     "\tK, forced (Nm): %s\n"
+            #     "\tK, unforced (Nm): %s" % (encoder_delta_rad_avg,
+            #         brake_torque_forcing_nm_avg, brake_torque_unforcing_nm_avg,
+            #         k_forced, k_unforced
+            #     )
+            # )
+            print(
+                "Sample results:\n"
+                "\tDisplacement (rad): %s\n" % str(encoder_delta_rad_avg)
+            )
+
+            self.encoder_reader_bridge_sub.enabled = False
+            # self.brake_controller_bridge_sub.enabled = False
+            self.taking_sample_lock.clear()
 
     def ramp_up_brake(self):
         for step_num in range(self.experiment_num_steps):
