@@ -220,7 +220,7 @@ class DataPlotter(Node):
 
         self.diff_plot_container.append_x(message.timestamp)
         self.diff_plot_container.append_y("abs", abs_enc1_angle - abs_enc2_angle)
-        self.diff_plot_container.append_y("rel", abs_enc1_angle - abs_enc2_angle)
+        self.diff_plot_container.append_y("rel", rel_encoder_1 - rel_encoder_2)
         self.diff_plot_container.append_y("motor", rel_encoder_2 - motor_encoder)
 
     async def get_brake_data(self):

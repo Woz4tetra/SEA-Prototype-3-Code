@@ -14,7 +14,8 @@ class ExperimentOrchestrator(Orchestrator):
         self.set_default(write=False)
         super(ExperimentOrchestrator, self).__init__(event_loop)
 
-        self.experiment = ExperimentNode(2.0, 50, 15.0, "brake_torque_data/B15 Torque Table.csv", enabled=True)
+        # self.experiment = ExperimentNode(2.0, 50, 15.0, "brake_torque_data/B15 Torque Table.csv", enabled=True)
+        self.experiment = ExperimentNode(2.0, 50, 15.0, "brake_torque_data/B5Z Torque Table.csv", enabled=True)
         self.plot = DataPlotter(enabled=True)
         self.ui = TkinterGUI("pickled/pid_constants.pkl")
 

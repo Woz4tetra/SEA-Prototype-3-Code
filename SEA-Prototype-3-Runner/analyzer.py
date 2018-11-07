@@ -115,13 +115,14 @@ def save_fig(path):
     plt.savefig(path, dpi=200)
 
 class DataAggregator(Node):
-    def __init__(self, torque_table_path, filename, directory, save_figures=True, enabled=True):
+    def __init__(self, torque_table_path, filename, directory, save_figures=True, enabled=True, enable_smoothing=False):
         super(DataAggregator, self).__init__(enabled)
 
         self.torque_table = TorqueTable(torque_table_path)
         self.log_filename = os.path.splitext(filename)[0]
         self.log_directory = directory
         self.save_figures = save_figures
+        self.enable_smoothing = enable_smoothing
 
         self.brake_tag = "brake"
         self.brake_sub = self.define_subscription(self.brake_tag, message_type=packet.Packet, callback=self.brake_callback)
@@ -208,7 +209,7 @@ class DataAggregator(Node):
             self.torque_table,
             self.encoder_timestamps, self.encoder_1_ticks, self.encoder_2_ticks,
             self.brake_timestamps, self.brake_current,
-            self.motor_direction_switch_time
+            self.motor_direction_switch_time, self.enable_smoothing
         )
 
         new_fig()
@@ -228,22 +229,24 @@ class DataAggregator(Node):
         plt.xlabel("Time (s)")
         plt.ylabel("Current sensed (mA)")
         plt.plot(brake_timestamps, brake_current)
-        plt.plot(brake_timestamps[brake_ramp_transitions], brake_current[brake_ramp_transitions], 'x')
+        if brake_ramp_transitions is not None:
+            plt.plot(brake_timestamps[brake_ramp_transitions], brake_current[brake_ramp_transitions], 'x')
         plt.axvline(self.experiment_start_time, color="black")
         plt.axvline(self.experiment_stop_time, color="black")
         if self.save_figures:
             save_fig("%s-%s/raw_brake_data" % (self.log_directory, self.log_filename))
 
-        new_fig()
-        plt.title("Brake torque vs. delta angle")
-        plt.xlabel("Delta angle (rad)")
-        plt.ylabel("Brake torque (Nm)")
-        plt.plot(encoder_interp_delta, brake_torque_nm, '.', markersize=0.5)
-        plt.plot(encoder_interp_delta, encoder_lin_reg, label='m=%0.4fNm/rad, b=%0.4fNm' % (polynomial[0], polynomial[1]))
-        plt.plot(0, 0, '+', markersize=15)
-        plt.legend()
-        if self.save_figures:
-            save_fig("%s-%s/torque_vs_angle" % (self.log_directory, self.log_filename))
+        if brake_torque_nm is not None:
+            new_fig()
+            plt.title("Brake torque vs. delta angle")
+            plt.xlabel("Delta angle (rad)")
+            plt.ylabel("Brake torque (Nm)")
+            plt.plot(encoder_interp_delta, brake_torque_nm, '.', markersize=0.5)
+            plt.plot(encoder_interp_delta, encoder_lin_reg, label='m=%0.4fNm/rad, b=%0.4fNm' % (polynomial[0], polynomial[1]))
+            plt.plot(0, 0, '+', markersize=15)
+            plt.legend()
+            if self.save_figures:
+                save_fig("%s-%s/torque_vs_angle" % (self.log_directory, self.log_filename))
 
         plt.show()
 
@@ -256,15 +259,21 @@ class PlaybackOrchestrator(Orchestrator):
         super(PlaybackOrchestrator, self).__init__(event_loop, return_when=asyncio.ALL_COMPLETED)
 
         # filename = "20_56_08.log"
-        filename = "22_35_04.log"
-        directory = "2018_Oct_30"
-        torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        # filename = "22_35_04.log"
+        # directory = "2018_Oct_30"
+        # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        # enable_smoothing = False
+
+        filename = "23_45_11.log"
+        directory = "2018_Nov_06"
+        torque_table_path = "brake_torque_data/B5Z Torque Table.csv"
+        enable_smoothing = True
 
         self.brake = BrakePlayback(filename, directory)
         self.motor = MotorPlayback(filename, directory)
         self.encoders = EncoderPlayback(filename, directory)
         self.experiment = ExperimentPlayback(filename, directory)
-        self.aggregator = DataAggregator(torque_table_path, filename, directory, save_figures=True, enabled=True)
+        self.aggregator = DataAggregator(torque_table_path, filename, directory, save_figures=True, enabled=True, enable_smoothing=enable_smoothing)
 
         # self.add_nodes(self.brake, self.motor, self.encoders, self.experiment)
         self.subscribe(self.brake, self.aggregator, self.aggregator.brake_tag)
