@@ -3,6 +3,7 @@ import asyncio
 from atlasbuggy import Node
 
 from data_processing.experiment_helpers import *
+from data_processing.experiment_helpers.single_weight_helpers import average_sample
 from data_processing.torque_table import TorqueTable
 
 
@@ -124,44 +125,8 @@ class ExperimentNode(Node):
                     encoder_2_ticks.append(message.data[5])
                 await asyncio.sleep(0.0)
 
-                # while not self.brake_controller_bridge_queue.empty():
-                #     message = await self.brake_controller_bridge_queue.get()
-                #     brake_timestamps.append(message.timestamp)
-                #     brake_current.append(message.data[2])
-
-            # encoder_timestamps = np.array(encoder_timestamps)
-            encoder_1_ticks = np.array(encoder_1_ticks)
-            encoder_2_ticks = np.array(encoder_2_ticks)
-            encoder_delta = encoder_1_ticks - encoder_2_ticks
-            # brake_timestamps = np.array(brake_timestamps)
-            # brake_current = np.array(brake_current)
-            #
-            # encoder_interp_delta = interpolate_encoder_values(
-            #     encoder_timestamps, encoder_1_ticks, encoder_2_ticks,
-            #     default_rel_enc_ticks_to_rad, brake_timestamps
-            # )
-            # brake_torque_forcing_nm = self.torque_table.to_torque(True, brake_current)
-            # brake_torque_unforcing_nm = self.torque_table.to_torque(False, brake_current)
-            #
-            encoder_delta_rad_avg = np.mean(encoder_delta) * default_rel_enc_ticks_to_rad
-            # brake_torque_forcing_nm_avg = np.mean(brake_torque_forcing_nm)
-            # brake_torque_unforcing_nm_avg = np.mean(brake_torque_unforcing_nm)
-            #
-            # k_forced = brake_torque_forcing_nm_avg / encoder_delta_rad_avg
-            # k_unforced = brake_torque_unforcing_nm_avg / encoder_delta_rad_avg
-            #
-            # print(
-            #     "Sample results:\n"
-            #     "\tDisplacement (rad): %s\n"
-            #     "\tTorque, forced (N): %s\n"
-            #     "\tTorque, unforced (N): %s\n"
-            #     "\tK, forced (Nm): %s\n"
-            #     "\tK, unforced (Nm): %s" % (encoder_delta_rad_avg,
-            #         brake_torque_forcing_nm_avg, brake_torque_unforcing_nm_avg,
-            #         k_forced, k_unforced
-            #     )
-            # )
-            print(
+            encoder_delta_rad_avg = average_sample(encoder_1_ticks, encoder_2_ticks)
+            self.logger.info(
                 "Sample results:\n"
                 "\tDisplacement (rad): %s\n" % str(encoder_delta_rad_avg)
             )
