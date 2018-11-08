@@ -1,9 +1,10 @@
 import time
 import asyncio
-import numpy as np
 from atlasbuggy import Node
 
-from experiment_helpers import *
+from data_processing.experiment_helpers import *
+from data_processing.torque_table import TorqueTable
+
 
 class ExperimentNode(Node):
     def __init__(self, step_duration, num_steps, min_current_mA, torque_table_path, enabled=True):
@@ -196,4 +197,5 @@ class ExperimentNode(Node):
     def write_pause(self, time_interval):
         self.experiment_time += time_interval
         self.motor_controller_bridge.write_pause(self.experiment_time)
-        self.brake_controller_bridge.brake_controller_bridge_arduino.write_pause(self.experiment_time, relative_time=False)
+        self.brake_controller_bridge.brake_controller_bridge_arduino.write_pause(self.experiment_time,
+                                                                                 relative_time=False)

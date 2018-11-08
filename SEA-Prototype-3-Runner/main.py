@@ -3,10 +3,7 @@ from atlasbuggy import Orchestrator, run
 
 from gui.data_plotter import DataPlotter
 from gui.control_ui import TkinterGUI
-from brake_controller_bridge import BrakeControllerBridge
-from motor_controller_bridge import MotorControllerBridge
-from encoder_reader_bridge import EncoderReaderBridge
-from experiment_node import ExperimentNode
+from hardware import BrakeControllerBridge, MotorControllerBridge, EncoderReaderBridge, ExperimentNode
 
 
 class ExperimentOrchestrator(Orchestrator):

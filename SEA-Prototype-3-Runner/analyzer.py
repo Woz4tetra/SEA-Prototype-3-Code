@@ -1,135 +1,32 @@
-import os
 import time
-import math
-import asyncio
-import numpy as np
-import matplotlib.pyplot as plt
-
-from arduino_factory import packet
-from atlasbuggy.log.playback import PlaybackNode
 from atlasbuggy import Orchestrator, Node, run
 
-from experiment_helpers import *
+from data_processing.experiment_helpers.plot_helpers import *
+from data_processing.experiment_helpers.k_calculator_helpers import compute_k
+from data_processing.hardware_playback import *
+from data_processing.torque_table import TorqueTable
 
-class BrakePlayback(PlaybackNode):
-    def __init__(self, filename, directory, enabled=True):
-        super(BrakePlayback, self).__init__(
-            "logs/%s/BrakeControllerBridge/%s" % (directory, filename),
-            enabled=enabled, update_rate=0.0)
-        self.done = False
-
-    async def parse(self, line):
-        message = packet.parse(line.message)
-        # print(message is not None, line.message)
-        if message is not None:
-            await self.broadcast(message)
-
-    async def completed(self):
-        self.done = True
-
-class EncoderPlayback(PlaybackNode):
-    def __init__(self, filename, directory, enabled=True):
-        super(EncoderPlayback, self).__init__(
-            "logs/%s/EncoderReaderBridge/%s" % (directory, filename),
-            enabled=enabled, update_rate=0.0)
-        self.done = False
-
-    async def parse(self, line):
-        message = packet.parse(line.message)
-        if message is not None:
-            # self.logger.info("recovered: %s" % message)
-            await self.broadcast(message)
-
-    async def completed(self):
-        self.done = True
-
-class MotorPlayback(PlaybackNode):
-    def __init__(self, filename, directory, enabled=True):
-        super(MotorPlayback, self).__init__(
-            "logs/%s/MotorControllerBridge/%s" % (directory, filename),
-            enabled=enabled, update_rate=0.0)
-        self.done = False
-        self.command_flag = "command: "
-
-    async def parse(self, line):
-        if line.message == "Executing motor command queue backlog":
-            await self.broadcast(("start", line.timestamp))
-        elif line.message.startswith(self.command_flag):
-            command = int(line.message[len(self.command_flag):])
-            self.logger.info("recovered motor command: %s, %s" % (command, line.timestamp))
-            await self.broadcast(("command", command, line.timestamp))
-        elif line.message == "Command queue backlog finished!":
-            await self.broadcast(("stop", line.timestamp))
-        else:
-            await asyncio.sleep(0.0)
-
-    async def completed(self):
-        self.done = True
-
-class ExperimentPlayback(PlaybackNode):
-    def __init__(self, filename, directory, enabled=True):
-        super(ExperimentPlayback, self).__init__(
-            "logs/%s/ExperimentNode/%s" % (directory, filename),
-            enabled=enabled, update_rate=0.0)
-        self.done = False
-
-    async def parse(self, line):
-        self.logger.info("recovered: %s" % line.message)
-        await asyncio.sleep(0.0)
-
-    async def completed(self):
-        self.done = True
-
-current_fig_num = 0
-
-def new_fig(fig_num=None):
-    """Create a new figure"""
-
-    global current_fig_num, current_fig
-    if fig_num is None:
-        current_fig_num += 1
-    else:
-        current_fig_num = fig_num
-    fig = plt.figure(current_fig_num)
-    fig.canvas.mpl_connect('key_press_event', press)
-    current_fig = fig
-
-    return fig
-
-def press(event):
-    """matplotlib key press event. Close all figures when q is pressed"""
-    if event.key == "q":
-        plt.close("all")
-
-def mkdir(path, is_file=True):
-    if is_file:
-        path = os.path.split(path)[0]  # remove the file part of the path
-
-    if not os.path.isdir(path):
-        os.makedirs(path)
-
-def save_fig(path):
-    path = "figures/%s.png" % path
-    mkdir(path)
-    print("saving to '%s'" % path)
-    plt.savefig(path, dpi=200)
 
 class DataAggregator(Node):
-    def __init__(self, torque_table_path, filename, directory, save_figures=True, enabled=True, enable_smoothing=False):
+    def __init__(self, torque_table_path, filename, directory, conical_annulus_size, save_figures=True, enabled=True,
+                 enable_smoothing=False):
         super(DataAggregator, self).__init__(enabled)
 
         self.torque_table = TorqueTable(torque_table_path)
         self.log_filename = os.path.splitext(filename)[0]
         self.log_directory = directory
+        self.conical_annulus_size = conical_annulus_size
         self.save_figures = save_figures
         self.enable_smoothing = enable_smoothing
 
         self.brake_tag = "brake"
-        self.brake_sub = self.define_subscription(self.brake_tag, message_type=packet.Packet, callback=self.brake_callback)
+        self.brake_sub = self.define_subscription(self.brake_tag, message_type=packet.Packet,
+                                                  callback=self.brake_callback)
         self.brake = None
 
         self.encoders_tag = "encoders"
-        self.encoders_sub = self.define_subscription(self.encoders_tag, message_type=packet.Packet, callback=self.encoders_callback)
+        self.encoders_sub = self.define_subscription(self.encoders_tag, message_type=packet.Packet,
+                                                     callback=self.encoders_callback)
         self.encoder = None
 
         self.motor_tag = "motor"
@@ -141,7 +38,8 @@ class DataAggregator(Node):
         self.motor_direction_switch_time = 0.0
 
         self.experiment_tag = "experiment"
-        self.experiment_sub = self.define_subscription(self.experiment_tag, message_type=tuple, callback=self.experiment_callback)
+        self.experiment_sub = self.define_subscription(self.experiment_tag, message_type=tuple,
+                                                       callback=self.experiment_callback)
         self.experiment = None
 
         self.brake_start_time = 0.0
@@ -202,15 +100,15 @@ class DataAggregator(Node):
         else:
             return False
 
-
     async def teardown(self):
         encoder_timestamps, encoder_delta, encoder_interp_delta, encoder_lin_reg, \
-            brake_timestamps, brake_current, brake_ramp_transitions, brake_torque_nm, polynomial = compute_k(
-            self.torque_table,
-            self.encoder_timestamps, self.encoder_1_ticks, self.encoder_2_ticks,
-            self.brake_timestamps, self.brake_current,
-            self.motor_direction_switch_time, self.enable_smoothing
-        )
+        brake_timestamps, brake_current, brake_ramp_transitions, brake_torque_nm, polynomial = \
+            compute_k(
+                self.torque_table,
+                self.encoder_timestamps, self.encoder_1_ticks, self.encoder_2_ticks,
+                self.brake_timestamps, self.brake_current,
+                self.motor_direction_switch_time, self.enable_smoothing
+            )
 
         new_fig()
         plt.title("Raw Encoder Data")
@@ -222,7 +120,7 @@ class DataAggregator(Node):
         plt.axvline(self.experiment_stop_time, color="black")
         plt.legend()
         if self.save_figures:
-            save_fig("%s-%s/raw_encoder_data" % (self.log_directory, self.log_filename))
+            save_fig("%s/%s-%s/raw_encoder_data" % (self.conical_annulus_size, self.log_directory, self.log_filename))
 
         new_fig()
         plt.title("Raw Brake Data")
@@ -234,7 +132,7 @@ class DataAggregator(Node):
         plt.axvline(self.experiment_start_time, color="black")
         plt.axvline(self.experiment_stop_time, color="black")
         if self.save_figures:
-            save_fig("%s-%s/raw_brake_data" % (self.log_directory, self.log_filename))
+            save_fig("%s/%s-%s/raw_brake_data" % (self.conical_annulus_size, self.log_directory, self.log_filename))
 
         if brake_torque_nm is not None:
             new_fig()
@@ -242,14 +140,15 @@ class DataAggregator(Node):
             plt.xlabel("Delta angle (rad)")
             plt.ylabel("Brake torque (Nm)")
             plt.plot(encoder_interp_delta, brake_torque_nm, '.', markersize=0.5)
-            plt.plot(encoder_interp_delta, encoder_lin_reg, label='m=%0.4fNm/rad, b=%0.4fNm' % (polynomial[0], polynomial[1]))
+            plt.plot(encoder_interp_delta, encoder_lin_reg,
+                     label='m=%0.4fNm/rad, b=%0.4fNm' % (polynomial[0], polynomial[1]))
             plt.plot(0, 0, '+', markersize=15)
             plt.legend()
             if self.save_figures:
-                save_fig("%s-%s/torque_vs_angle" % (self.log_directory, self.log_filename))
+                save_fig(
+                    "%s/%s-%s/torque_vs_angle" % (self.conical_annulus_size, self.log_directory, self.log_filename))
 
         plt.show()
-
 
 
 class PlaybackOrchestrator(Orchestrator):
@@ -261,11 +160,13 @@ class PlaybackOrchestrator(Orchestrator):
         # filename = "20_56_08.log"
         # filename = "22_35_04.log"
         # directory = "2018_Oct_30"
+        # conical_annulus_size = "0.25x1.25x0.49"
         # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
         # enable_smoothing = False
 
         filename = "23_45_11.log"
         directory = "2018_Nov_06"
+        conical_annulus_size = "0.25x1.25x0.49"
         torque_table_path = "brake_torque_data/B5Z Torque Table.csv"
         enable_smoothing = True
 
@@ -273,7 +174,10 @@ class PlaybackOrchestrator(Orchestrator):
         self.motor = MotorPlayback(filename, directory)
         self.encoders = EncoderPlayback(filename, directory)
         self.experiment = ExperimentPlayback(filename, directory)
-        self.aggregator = DataAggregator(torque_table_path, filename, directory, save_figures=True, enabled=True, enable_smoothing=enable_smoothing)
+        self.aggregator = DataAggregator(
+            torque_table_path, filename, directory, conical_annulus_size,
+            save_figures=True, enabled=True, enable_smoothing=enable_smoothing
+        )
 
         # self.add_nodes(self.brake, self.motor, self.encoders, self.experiment)
         self.subscribe(self.brake, self.aggregator, self.aggregator.brake_tag)
@@ -294,5 +198,6 @@ class PlaybackOrchestrator(Orchestrator):
         self.t1 = time.time()
 
         print("took: %ss" % (self.t1 - self.t0))
+
 
 run(PlaybackOrchestrator)

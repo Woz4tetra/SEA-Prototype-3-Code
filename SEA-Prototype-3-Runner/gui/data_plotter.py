@@ -2,7 +2,7 @@ import asyncio
 from threading import Event
 from atlasbuggy import Node
 
-from experiment_helpers import *
+from data_processing.experiment_helpers import *
 
 
 class LineArgsContainer:
