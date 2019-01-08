@@ -158,16 +158,40 @@ class PlaybackOrchestrator(Orchestrator):
         super(PlaybackOrchestrator, self).__init__(event_loop, return_when=asyncio.ALL_COMPLETED)
 
         # filename = "20_56_08.log"
-        filename = "22_35_04.log"
-        directory = "2018_Oct_30"
-        conical_annulus_size = "0.25x1.25x0.49"
-        torque_table_path = "brake_torque_data/B15 Torque Table.csv"
-        enable_smoothing = False
+        # filename = "22_35_04.log"
+        # directory = "2018_Oct_30"
+        # conical_annulus_size = "0.5x1.0x0.365"
+        # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        # enable_smoothing = False
 
         # filename = "23_45_11.log"
         # directory = "2018_Nov_06"
-        # conical_annulus_size = "0.25x1.25x0.49"
+        # conical_annulus_size = "0.5x1.0x0.365"
         # torque_table_path = "brake_torque_data/B5Z Torque Table.csv"
+        # enable_smoothing = True
+
+        # filename = "23_25_50.log"
+        # directory = "2018_Nov_08"
+        # conical_annulus_size = "0.25x1.25x0.49"
+        # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        # enable_smoothing = True
+
+        # filename = "22_57_03.log"
+        # directory = "2018_Nov_16"
+        # conical_annulus_size = "0.75x1.75x0.725"
+        # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        # enable_smoothing = True
+
+        filename = "20_57_43.log"
+        directory = "2019_Jan_07"
+        conical_annulus_size = "0.75x1.75x0.725"
+        torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        enable_smoothing = True
+
+        # filename = "22_33_12.log"
+        # directory = "2019_Jan_07"
+        # conical_annulus_size = "1.5x1.75x0.725"
+        # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
         # enable_smoothing = True
 
         self.brake = BrakePlayback(filename, directory)

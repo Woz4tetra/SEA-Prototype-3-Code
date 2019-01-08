@@ -1,5 +1,3 @@
-import matplotlib.pyplot as plt
-
 from data_processing.experiment_helpers.single_weight_helpers import *
 from data_processing.experiment_helpers.k_calculator_helpers import compute_linear_regression
 from data_processing.experiment_helpers.plot_helpers import *
@@ -12,22 +10,38 @@ def run_single_weight_tests():
 
     weight_load_point_offset_cm = 0.0
     # weight_load_point_offset_cm = -3.2
-    K = 2.9887
+
+    # 0.25x1.25x0.49
+    # K = 2.9887
+
+    # 0.75x1.75x0.725
+    K = 15.0774
 
     for net_moment, actual_displacement, error in [
+        single_weight_test(0.0, 0.0, K, False),
+
+        # 0.25x1.25x0.49
+
         # initial_tests:
-        single_weight_test(18.0 - weight_load_point_offset_cm, 0.41783182292744253, K),
-        single_weight_test(19.0 - weight_load_point_offset_cm, 0.38515925933010864, K),
-        single_weight_test(22.0 - weight_load_point_offset_cm, 0.2984513020910304, K),
-        single_weight_test(0.0, 0.025132741228718346, K, False),
+        # single_weight_test(18.0 - weight_load_point_offset_cm, 0.41783182292744253, K),
+        # single_weight_test(19.0 - weight_load_point_offset_cm, 0.38515925933010864, K),
+        # single_weight_test(22.0 - weight_load_point_offset_cm, 0.2984513020910304, K),
+        # single_weight_test(0.0, 0.025132741228718346, K, False),
+        #
+        # # tipped forward:
+        # single_weight_test(20.0, 0.3675156696207544, K),
+        # single_weight_test(15.0, 0.4727224279026642, K),
+        #
+        # # tipped backward:
+        # single_weight_test(20.0, 0.35814156250923646, K),
+        # single_weight_test(15.0, 0.48694686130641796, K),
 
-        # tipped forward:
-        single_weight_test(20.0, 0.3675156696207544, K),
-        single_weight_test(15.0, 0.4727224279026642, K),
+        # 0.75x1.75x0.725
 
-        # tipped backward:
-        single_weight_test(20.0, 0.35814156250923646, K),
-        single_weight_test(15.0, 0.48694686130641796, K),
+        single_weight_test(18.0, 0.09110618695410401, K),
+        single_weight_test(19.0, 0.08469389509951662, K),
+        single_weight_test(21.0, 0.07539822368615504, K),
+        single_weight_test(23.0, 0.07853981633974483, K),
     ]:
         moments.append(net_moment)
         actual_displacements.append(actual_displacement)
@@ -60,4 +74,8 @@ def run_single_weight_tests():
     plt.show()
 
 
+experiments = {
+    # 0.25x1.25x0.49
+    ""
+}
 run_single_weight_tests()

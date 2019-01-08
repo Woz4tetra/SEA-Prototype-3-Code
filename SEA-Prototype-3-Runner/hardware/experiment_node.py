@@ -8,7 +8,7 @@ from data_processing.torque_table import TorqueTable
 
 
 class ExperimentNode(Node):
-    def __init__(self, step_duration, num_steps, min_current_mA, torque_table_path, enabled=True):
+    def __init__(self, step_duration, num_steps, min_current_mA, torque_table_path, max_current_mA=None, enabled=True):
         self.set_logger(write=True)
         super(ExperimentNode, self).__init__(enabled)
         self.brake_controller_bridge_tag = "brake_controller_bridge"
@@ -35,6 +35,12 @@ class ExperimentNode(Node):
         self.torque_table = TorqueTable(torque_table_path)
         self.min_torque_forcing = self.torque_table.to_torque(True, min_current_mA)
         self.min_torque_unforcing = self.torque_table.to_torque(False, min_current_mA)
+        if max_current_mA is None:
+            self.max_torque_forcing = self.torque_table.max_torque
+            self.max_torque_unforcing = self.torque_table.max_torque
+        else:
+            self.max_torque_forcing = self.torque_table.to_torque(True, max_current_mA)
+            self.max_torque_unforcing = self.torque_table.to_torque(False, max_current_mA)
 
         self.experiment_step_duration = step_duration
         self.experiment_num_steps = num_steps
@@ -149,13 +155,13 @@ class ExperimentNode(Node):
 
     def get_forcing_current_mA(self, step_num):
         percent_torque = (step_num + 1) / self.experiment_num_steps
-        torque = percent_torque * (self.torque_table.max_torque - self.min_torque_forcing) + self.min_torque_forcing
+        torque = percent_torque * (self.max_torque_forcing - self.min_torque_forcing) + self.min_torque_forcing
         current_mA = self.torque_table.to_current_mA(True, torque)
         return current_mA
 
     def get_unforcing_current_mA(self, step_num):
         percent_torque = (step_num + 1) / self.experiment_num_steps
-        torque = percent_torque * (self.torque_table.max_torque - self.min_torque_unforcing) + self.min_torque_unforcing
+        torque = percent_torque * (self.max_torque_unforcing - self.min_torque_unforcing) + self.min_torque_unforcing
         current_mA = self.torque_table.to_current_mA(False, torque)
         return current_mA
 
