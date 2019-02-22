@@ -1,5 +1,6 @@
 import time
 import math
+import numpy as np
 from atlasbuggy import Orchestrator, Node, run
 
 from data_processing.experiment_helpers.plot_helpers import *
@@ -10,7 +11,8 @@ from data_processing.torque_table import TorqueTable
 rel_enc_ticks_to_rad = 2 * math.pi / 2000.0
 motor_enc_ticks_to_rad = 2 * math.pi / (131.25 * 64)
 abs_gear_ratio = 48.0 / 32.0
-abs_enc_ticks_to_rad = 2 * math.pi / 1024.0 * abs_gear_ratio
+abs_ticks_per_rotation = 1024.0
+abs_enc_ticks_to_rad = 2 * math.pi / abs_ticks_per_rotation * abs_gear_ratio
 
 
 class DataAggregator(Node):
@@ -59,8 +61,8 @@ class DataAggregator(Node):
         self.encoder_timestamps = []
         self.abs_encoder_1_ticks = []
         self.abs_encoder_2_ticks = []
-        self.encoder_1_ticks = []
-        self.encoder_2_ticks = []
+        self.diff_encoder_1_ticks = []
+        self.diff_encoder_2_ticks = []
         self.motor_encoder_ticks = []
 
     def take(self):
@@ -90,8 +92,8 @@ class DataAggregator(Node):
         self.encoder_timestamps.append(message.timestamp + self.encoder_start_time)
         self.abs_encoder_1_ticks.append(message.data[2])
         self.abs_encoder_2_ticks.append(message.data[3])
-        self.encoder_1_ticks.append(message.data[4])
-        self.encoder_2_ticks.append(message.data[5])
+        self.diff_encoder_1_ticks.append(message.data[4])
+        self.diff_encoder_2_ticks.append(message.data[5])
         self.motor_encoder_ticks.append(message.data[6])
 
     def motor_callback(self, message):
@@ -114,22 +116,64 @@ class DataAggregator(Node):
             return False
 
     async def teardown(self):
+        formatted_abs_enc_1_ticks = format_abs_enc_ticks(self.abs_encoder_1_ticks, abs_ticks_per_rotation, 0.0)
+        formatted_abs_enc_2_ticks = format_abs_enc_ticks(self.abs_encoder_2_ticks, abs_ticks_per_rotation, 274.0)
+
+        self.encoder_timestamps = np.array(self.encoder_timestamps)
+        formatted_abs_enc_1_ticks = np.array(formatted_abs_enc_1_ticks)
+        formatted_abs_enc_2_ticks = np.array(formatted_abs_enc_2_ticks)
+        self.diff_encoder_1_ticks = np.array(self.diff_encoder_1_ticks)
+        self.diff_encoder_2_ticks = np.array(self.diff_encoder_2_ticks)
+        self.motor_encoder_ticks = np.array(self.motor_encoder_ticks)
+
+        self.brake_timestamps = np.array(self.brake_timestamps)
+        self.brake_current = np.array(self.brake_current)
+
+        basklash_time_compensation = 0.5
+        exp_start_index = (np.abs(self.encoder_timestamps - (self.experiment_start_time + basklash_time_compensation))).argmin()
+
+        formatted_abs_enc_1_ticks = formatted_abs_enc_1_ticks - formatted_abs_enc_1_ticks[exp_start_index]
+        formatted_abs_enc_2_ticks = formatted_abs_enc_2_ticks - formatted_abs_enc_2_ticks[exp_start_index]
+
         if self.use_abs_encoders:
-            self.encoder_1_ticks = format_abs_enc_ticks(self.abs_encoder_1_ticks, abs_enc_ticks_to_rad, 0.0)
-            self.encoder_2_ticks = format_abs_enc_ticks(self.abs_encoder_2_ticks, abs_enc_ticks_to_rad, 274.0)
+            encoder_1_ticks = formatted_abs_enc_1_ticks
+            encoder_2_ticks = formatted_abs_enc_2_ticks
             enc_ticks_to_rad = abs_enc_ticks_to_rad
+            self.experiment_start_time += basklash_time_compensation
         else:
+            encoder_1_ticks = self.diff_encoder_1_ticks
+            encoder_2_ticks = self.diff_encoder_2_ticks
             enc_ticks_to_rad = rel_enc_ticks_to_rad
 
         result = compute_k(
             self.torque_table,
-            self.encoder_timestamps, self.encoder_1_ticks, self.encoder_2_ticks, self.motor_encoder_ticks,
+            self.encoder_timestamps, encoder_1_ticks, encoder_2_ticks, self.motor_encoder_ticks,
             self.brake_timestamps, self.brake_current,
-            self.motor_direction_switch_time, enc_ticks_to_rad, motor_enc_ticks_to_rad, self.enable_smoothing
+            self.motor_direction_switch_time, enc_ticks_to_rad, motor_enc_ticks_to_rad, self.enable_smoothing,
+            self.experiment_start_time, self.experiment_stop_time,
         )
-        
+
+        abs_enc_delta = (formatted_abs_enc_1_ticks - formatted_abs_enc_2_ticks) * abs_enc_ticks_to_rad
+        diff_enc_delta = (self.diff_encoder_1_ticks - self.diff_encoder_2_ticks) * rel_enc_ticks_to_rad
         print("backward backlash deg:", math.degrees(result.motor_backward_backlash_rad))
         print("forward backlash deg:", math.degrees(result.motor_forward_backlash_rad))
+
+        new_fig()
+        plt.title("Absolute vs. Incremental Encoder Comparison")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Delta angle (rad)")
+        plt.plot(self.encoder_timestamps, abs_enc_delta, '.', markersize=1.0, label="absolute")
+        plt.plot(self.encoder_timestamps, diff_enc_delta, '.', markersize=1.0, label="incremental")
+        plt.axvline(self.experiment_start_time, color="black")
+        plt.axvline(self.experiment_stop_time, color="black")
+        plt.legend()
+        if self.save_figures:
+            save_fig("%s/%s-%s/encoder_data_comp" % (self.conical_annulus_size, self.log_directory, self.log_filename))
+
+        # new_fig()
+        # plt.plot(result.encoder_timestamps, formatted_abs_enc_1_ticks, '.')
+        # plt.plot(result.encoder_timestamps, formatted_abs_enc_2_ticks, '.')
+        # plt.plot(result.encoder_timestamps, diff_enc_delta, '.')
 
         new_fig()
         plt.title("Raw Encoder Data")
@@ -179,7 +223,8 @@ class PlaybackOrchestrator(Orchestrator):
 
         super(PlaybackOrchestrator, self).__init__(event_loop, return_when=asyncio.ALL_COMPLETED)
 
-        use_abs_encoders = False
+        use_abs_encoders = True
+        save_figures = False
 
         filename = "22_35_04.log"
         directory = "2018_Oct_30"
@@ -223,7 +268,7 @@ class PlaybackOrchestrator(Orchestrator):
         self.experiment = ExperimentPlayback(filename, directory)
         self.aggregator = DataAggregator(
             torque_table_path, filename, directory, conical_annulus_size,
-            save_figures=True, enabled=True, enable_smoothing=enable_smoothing, use_abs_encoders=use_abs_encoders
+            save_figures=save_figures, enabled=True, enable_smoothing=enable_smoothing, use_abs_encoders=use_abs_encoders
         )
 
         # self.add_nodes(self.brake, self.motor, self.encoders, self.experiment)
