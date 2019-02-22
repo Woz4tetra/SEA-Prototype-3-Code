@@ -1,10 +1,23 @@
 import math
 import peakutils
 import numpy as np
+from collections import namedtuple
 
-default_rel_enc_ticks_to_rad = 2 * math.pi / 2000
-default_motor_enc_ticks_to_rad = 2 * math.pi / (131.25 * 64)
-default_abs_gear_ratio = 48.0 / 32.0
+ResultInfo = namedtuple(
+    "ResultInfo",
+
+    "encoder_timestamps "
+    "encoder_delta "
+    "encoder_interp_delta "
+    "encoder_lin_reg "
+    "brake_timestamps "
+    "brake_current "
+    "brake_ramp_transitions "
+    "brake_torque_nm "
+    "polynomial "
+    "motor_forward_backlash_rad "
+    "motor_backward_backlash_rad "
+)
 
 
 def savitzky_golay(y, window_size, order, deriv=0, rate=1):
@@ -33,18 +46,22 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     return np.convolve(m[::-1], y, mode='valid')
 
 
-def get_key_transistions(brake_timestamps, brake_current, motor_direction_switch_time):
-    brake_ramp_transitions = peakutils.indexes(brake_current, thres=0.9, min_dist=500)
+def get_brake_ramp_transitions(brake_current):
+    brake_ramp_transition_indices = peakutils.indexes(brake_current, thres=0.9, min_dist=500)
+    assert len(brake_ramp_transition_indices) == 2, len(brake_ramp_transition_indices)
+    return brake_ramp_transition_indices
+
+
+def get_motor_dir_transistion(brake_timestamps, enc_timestamps, motor_direction_switch_time):
     motor_direction_switch_brake_index = (np.abs(brake_timestamps - motor_direction_switch_time)).argmin()
-    assert len(brake_ramp_transitions) == 2, len(brake_ramp_transitions)
-    assert motor_direction_switch_brake_index > brake_ramp_transitions[0], motor_direction_switch_brake_index
+    motor_direction_switch_enc_index = (np.abs(enc_timestamps - motor_direction_switch_time)).argmin()
 
-    return brake_ramp_transitions, motor_direction_switch_brake_index
+    return motor_direction_switch_brake_index, motor_direction_switch_enc_index
 
 
-def interpolate_encoder_values(encoder_timestamps, encoder_1_ticks, encoder_2_ticks, rel_enc_ticks_to_rad,
+def interpolate_encoder_values(encoder_timestamps, encoder_1_ticks, encoder_2_ticks, ticks_to_rad,
                                brake_timestamps, enable_smoothing):
-    encoder_delta = (encoder_1_ticks - encoder_2_ticks) * rel_enc_ticks_to_rad
+    encoder_delta = (encoder_1_ticks - encoder_2_ticks) * ticks_to_rad
     if enable_smoothing:
         encoder_delta = savitzky_golay(encoder_delta, 501, 5)
     encoder_interp_delta = []
@@ -64,6 +81,14 @@ def interpolate_encoder_values(encoder_timestamps, encoder_1_ticks, encoder_2_ti
     return encoder_interp_delta, encoder_delta
 
 
+def get_motor_backlash(base_encoder_ticks, motor_ticks, rel_ticks_to_rad, motor_ticks_to_rad, motor_direction_switch_enc_index):
+    backlash_delta = base_encoder_ticks * rel_ticks_to_rad - motor_ticks * motor_ticks_to_rad
+
+    forward = np.mean(backlash_delta[0:motor_direction_switch_enc_index])
+    backward = np.mean(backlash_delta[motor_direction_switch_enc_index:])
+    return forward, backward
+
+
 def compute_linear_regression(encoder_interp_delta, brake_torque_nm):
     polynomial = np.polyfit(encoder_interp_delta, brake_torque_nm, 1)
     linear_regression_fn = np.poly1d(polynomial)
@@ -71,37 +96,58 @@ def compute_linear_regression(encoder_interp_delta, brake_torque_nm):
     return encoder_lin_reg, polynomial
 
 
-def compute_k(torque_table,
-              encoder_timestamps, encoder_1_ticks, encoder_2_ticks,
-              brake_timestamps, brake_current,
-              motor_direction_switch_time, enable_smoothing=False):
-    rel_enc_ticks_to_rad = default_rel_enc_ticks_to_rad
+def format_abs_enc_ticks(abs_enc_ticks, ticks_to_rad, fixed_diff):
+    formatted_abs_ticks = []
+    prev_tick = 0.0
+    rotations = 0
+    for tick in abs_enc_ticks:
+        if tick - prev_tick > 500:
+            rotations -= 1
+        if prev_tick - tick > 500:
+            rotations += 1
 
+        angle = rotations * 2 * math.pi + tick * ticks_to_rad
+        angle -= fixed_diff
+        formatted_abs_ticks.append(angle)
+    return formatted_abs_ticks
+
+
+def compute_k(torque_table,
+              encoder_timestamps, encoder_1_ticks, encoder_2_ticks, motor_enc_ticks,
+              brake_timestamps, brake_current,
+              motor_direction_switch_time, enc_ticks_to_rad, motor_ticks_to_rad, enable_smoothing):
     encoder_timestamps = np.array(encoder_timestamps)
     encoder_1_ticks = np.array(encoder_1_ticks)
     encoder_2_ticks = np.array(encoder_2_ticks)
+    motor_enc_ticks = np.array(motor_enc_ticks)
     brake_timestamps = np.array(brake_timestamps)
     brake_current = np.array(brake_current)
 
+    motor_direction_switch_brake_index, motor_direction_switch_enc_index = \
+        get_motor_dir_transistion(brake_timestamps, encoder_timestamps, motor_direction_switch_time)
+
     try:
-        brake_ramp_transitions, motor_direction_switch_brake_index = get_key_transistions(brake_timestamps,
-                                                                                          brake_current,
-                                                                                          motor_direction_switch_time)
+        brake_ramp_transition_indices = get_brake_ramp_transitions(brake_current)
     except AssertionError as error:
-        brake_ramp_transitions = None
+        brake_ramp_transition_indices = None
         motor_direction_switch_brake_index = None
         print(error)
 
-    encoder_interp_delta, encoder_delta = interpolate_encoder_values(encoder_timestamps, encoder_1_ticks,
-                                                                     encoder_2_ticks, rel_enc_ticks_to_rad,
-                                                                     brake_timestamps, enable_smoothing)
+    assert motor_direction_switch_brake_index > brake_ramp_transition_indices[0], motor_direction_switch_brake_index
 
-    if brake_ramp_transitions is not None:
+    motor_forward_backlash, motor_backward_backlash = \
+        get_motor_backlash(encoder_1_ticks, motor_enc_ticks, enc_ticks_to_rad, motor_ticks_to_rad, motor_direction_switch_enc_index)
+
+    encoder_interp_delta, encoder_delta = interpolate_encoder_values(
+        encoder_timestamps, encoder_1_ticks, encoder_2_ticks, enc_ticks_to_rad, brake_timestamps, enable_smoothing
+    )
+
+    if brake_ramp_transition_indices is not None:
         # convert sensed current to torque (Nm)
-        brake_current_forcing_forward = brake_current[0:brake_ramp_transitions[0]]
-        brake_current_unforcing_forward = brake_current[brake_ramp_transitions[0]:motor_direction_switch_brake_index]
-        brake_current_forcing_backward = brake_current[motor_direction_switch_brake_index:brake_ramp_transitions[1]]
-        brake_current_unforcing_backward = brake_current[brake_ramp_transitions[1]:]
+        brake_current_forcing_forward = brake_current[0:brake_ramp_transition_indices[0]]
+        brake_current_unforcing_forward = brake_current[brake_ramp_transition_indices[0]:motor_direction_switch_brake_index]
+        brake_current_forcing_backward = brake_current[motor_direction_switch_brake_index:brake_ramp_transition_indices[1]]
+        brake_current_unforcing_backward = brake_current[brake_ramp_transition_indices[1]:]
 
         btff = torque_table.to_torque(True, brake_current_forcing_forward)
         btuf = torque_table.to_torque(False, brake_current_unforcing_forward)
@@ -115,5 +161,6 @@ def compute_k(torque_table,
         encoder_lin_reg = None
         polynomial = None
 
-    return (encoder_timestamps, encoder_delta, encoder_interp_delta, encoder_lin_reg,
-            brake_timestamps, brake_current, brake_ramp_transitions, brake_torque_nm, polynomial)
+    return ResultInfo(encoder_timestamps, encoder_delta, encoder_interp_delta, encoder_lin_reg,
+                      brake_timestamps, brake_current, brake_ramp_transition_indices, brake_torque_nm, polynomial,
+                      motor_forward_backlash, motor_backward_backlash)

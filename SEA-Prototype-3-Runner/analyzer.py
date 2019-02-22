@@ -1,15 +1,21 @@
 import time
+import math
 from atlasbuggy import Orchestrator, Node, run
 
 from data_processing.experiment_helpers.plot_helpers import *
-from data_processing.experiment_helpers.k_calculator_helpers import compute_k
+from data_processing.experiment_helpers.k_calculator_helpers import compute_k, format_abs_enc_ticks
 from data_processing.hardware_playback import *
 from data_processing.torque_table import TorqueTable
+
+rel_enc_ticks_to_rad = 2 * math.pi / 2000.0
+motor_enc_ticks_to_rad = 2 * math.pi / (131.25 * 64)
+abs_gear_ratio = 48.0 / 32.0
+abs_enc_ticks_to_rad = 2 * math.pi / 1024.0 * abs_gear_ratio
 
 
 class DataAggregator(Node):
     def __init__(self, torque_table_path, filename, directory, conical_annulus_size, save_figures=True, enabled=True,
-                 enable_smoothing=False):
+                 enable_smoothing=False, use_abs_encoders=False):
         super(DataAggregator, self).__init__(enabled)
 
         self.torque_table = TorqueTable(torque_table_path)
@@ -18,6 +24,7 @@ class DataAggregator(Node):
         self.conical_annulus_size = conical_annulus_size
         self.save_figures = save_figures
         self.enable_smoothing = enable_smoothing
+        self.use_abs_encoders = use_abs_encoders
 
         self.brake_tag = "brake"
         self.brake_sub = self.define_subscription(self.brake_tag, message_type=packet.Packet,
@@ -50,8 +57,11 @@ class DataAggregator(Node):
 
         self.encoder_start_time = 0.0
         self.encoder_timestamps = []
+        self.abs_encoder_1_ticks = []
+        self.abs_encoder_2_ticks = []
         self.encoder_1_ticks = []
         self.encoder_2_ticks = []
+        self.motor_encoder_ticks = []
 
     def take(self):
         self.brake = self.brake_sub.get_producer()
@@ -78,8 +88,11 @@ class DataAggregator(Node):
             self.encoder_start_time = message.receive_time - message.timestamp
             print("encoder start time: %s" % self.encoder_start_time)
         self.encoder_timestamps.append(message.timestamp + self.encoder_start_time)
+        self.abs_encoder_1_ticks.append(message.data[2])
+        self.abs_encoder_2_ticks.append(message.data[3])
         self.encoder_1_ticks.append(message.data[4])
         self.encoder_2_ticks.append(message.data[5])
+        self.motor_encoder_ticks.append(message.data[6])
 
     def motor_callback(self, message):
         if message[0] == "start":
@@ -101,21 +114,29 @@ class DataAggregator(Node):
             return False
 
     async def teardown(self):
-        encoder_timestamps, encoder_delta, encoder_interp_delta, encoder_lin_reg, \
-        brake_timestamps, brake_current, brake_ramp_transitions, brake_torque_nm, polynomial = \
-            compute_k(
-                self.torque_table,
-                self.encoder_timestamps, self.encoder_1_ticks, self.encoder_2_ticks,
-                self.brake_timestamps, self.brake_current,
-                self.motor_direction_switch_time, self.enable_smoothing
-            )
+        if self.use_abs_encoders:
+            self.encoder_1_ticks = format_abs_enc_ticks(self.abs_encoder_1_ticks, abs_enc_ticks_to_rad, 0.0)
+            self.encoder_2_ticks = format_abs_enc_ticks(self.abs_encoder_2_ticks, abs_enc_ticks_to_rad, 274.0)
+            enc_ticks_to_rad = abs_enc_ticks_to_rad
+        else:
+            enc_ticks_to_rad = rel_enc_ticks_to_rad
+
+        result = compute_k(
+            self.torque_table,
+            self.encoder_timestamps, self.encoder_1_ticks, self.encoder_2_ticks, self.motor_encoder_ticks,
+            self.brake_timestamps, self.brake_current,
+            self.motor_direction_switch_time, enc_ticks_to_rad, motor_enc_ticks_to_rad, self.enable_smoothing
+        )
+        
+        print("backward backlash deg:", math.degrees(result.motor_backward_backlash_rad))
+        print("forward backlash deg:", math.degrees(result.motor_forward_backlash_rad))
 
         new_fig()
         plt.title("Raw Encoder Data")
         plt.xlabel("Time (s)")
         plt.ylabel("Delta angle (rad)")
-        plt.plot(encoder_timestamps, encoder_delta, label="all values")
-        plt.plot(brake_timestamps, encoder_interp_delta, 'x', markersize=0.1, label="used points")
+        plt.plot(result.encoder_timestamps, result.encoder_delta, label="all values")
+        plt.plot(result.brake_timestamps, result.encoder_interp_delta, 'x', markersize=0.1, label="used points")
         plt.axvline(self.experiment_start_time, color="black")
         plt.axvline(self.experiment_stop_time, color="black")
         plt.legend()
@@ -126,22 +147,23 @@ class DataAggregator(Node):
         plt.title("Raw Brake Data")
         plt.xlabel("Time (s)")
         plt.ylabel("Current sensed (mA)")
-        plt.plot(brake_timestamps, brake_current)
-        if brake_ramp_transitions is not None:
-            plt.plot(brake_timestamps[brake_ramp_transitions], brake_current[brake_ramp_transitions], 'x')
+        plt.plot(result.brake_timestamps, result.brake_current)
+        if result.brake_ramp_transitions is not None:
+            plt.plot(result.brake_timestamps[result.brake_ramp_transitions],
+                     result.brake_current[result.brake_ramp_transitions], 'x')
         plt.axvline(self.experiment_start_time, color="black")
         plt.axvline(self.experiment_stop_time, color="black")
         if self.save_figures:
             save_fig("%s/%s-%s/raw_brake_data" % (self.conical_annulus_size, self.log_directory, self.log_filename))
 
-        if brake_torque_nm is not None:
+        if result.brake_torque_nm is not None:
             new_fig()
             plt.title("Brake torque vs. delta angle")
             plt.xlabel("Delta angle (rad)")
             plt.ylabel("Brake torque (Nm)")
-            plt.plot(encoder_interp_delta, brake_torque_nm, '.', markersize=0.5)
-            plt.plot(encoder_interp_delta, encoder_lin_reg,
-                     label='m=%0.4fNm/rad, b=%0.4fNm' % (polynomial[0], polynomial[1]))
+            plt.plot(result.encoder_interp_delta, result.brake_torque_nm, '.', markersize=0.5)
+            plt.plot(result.encoder_interp_delta, result.encoder_lin_reg,
+                     label='m=%0.4fNm/rad, b=%0.4fNm' % (result.polynomial[0], result.polynomial[1]))
             plt.plot(0, 0, '+', markersize=15)
             plt.legend()
             if self.save_figures:
@@ -157,12 +179,13 @@ class PlaybackOrchestrator(Orchestrator):
 
         super(PlaybackOrchestrator, self).__init__(event_loop, return_when=asyncio.ALL_COMPLETED)
 
-        # filename = "20_56_08.log"
-        # filename = "22_35_04.log"
-        # directory = "2018_Oct_30"
-        # conical_annulus_size = "0.5x1.0x0.365"
-        # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
-        # enable_smoothing = False
+        use_abs_encoders = False
+
+        filename = "22_35_04.log"
+        directory = "2018_Oct_30"
+        conical_annulus_size = "0.5x1.0x0.365"
+        torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        enable_smoothing = False
 
         # filename = "23_45_11.log"
         # directory = "2018_Nov_06"
@@ -182,11 +205,11 @@ class PlaybackOrchestrator(Orchestrator):
         # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
         # enable_smoothing = True
 
-        filename = "20_57_43.log"
-        directory = "2019_Jan_07"
-        conical_annulus_size = "0.75x1.75x0.725"
-        torque_table_path = "brake_torque_data/B15 Torque Table.csv"
-        enable_smoothing = True
+        # filename = "20_57_43.log"
+        # directory = "2019_Jan_07"
+        # conical_annulus_size = "0.75x1.75x0.725"
+        # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        # enable_smoothing = True
 
         # filename = "22_33_12.log"
         # directory = "2019_Jan_07"
@@ -200,7 +223,7 @@ class PlaybackOrchestrator(Orchestrator):
         self.experiment = ExperimentPlayback(filename, directory)
         self.aggregator = DataAggregator(
             torque_table_path, filename, directory, conical_annulus_size,
-            save_figures=True, enabled=True, enable_smoothing=enable_smoothing
+            save_figures=True, enabled=True, enable_smoothing=enable_smoothing, use_abs_encoders=use_abs_encoders
         )
 
         # self.add_nodes(self.brake, self.motor, self.encoders, self.experiment)
