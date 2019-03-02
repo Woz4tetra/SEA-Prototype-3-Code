@@ -11,15 +11,16 @@ class ExperimentOrchestrator(Orchestrator):
         self.set_default(write=False)
         super(ExperimentOrchestrator, self).__init__(event_loop)
 
-        self.experiment = ExperimentNode(2.0, 50, 15.0, "brake_torque_data/B15 Torque Table.csv", enabled=True)
-        # self.experiment = ExperimentNode(2.0, 50, 15.0, "brake_torque_data/B5Z Torque Table.csv", enabled=True)
-        self.plot = DataPlotter(enabled=True)
-        self.ui = TkinterGUI("pickled/pid_constants.pkl")
 
         factory = DeviceFactory()
         self.motor = MotorControllerBridge(enabled=True)
         self.brake = BrakeControllerBridge(factory, enable_reporting=True)
         self.encoders = EncoderReaderBridge(factory, enable_reporting=True)
+
+        self.experiment = ExperimentNode(2.0, 50, 15.0, "brake_torque_data/B5Z Torque Table.csv", enabled=True)
+        # self.experiment = ExperimentNode(2.0, 50, 15.0, "brake_torque_data/B15 Torque Table.csv", enabled=True)
+        self.plot = DataPlotter(enabled=True)
+        self.ui = TkinterGUI("pickled/pid_constants.pkl")
 
         # self.add_nodes()
         self.subscribe(self.brake, self.plot, self.plot.brake_controller_bridge_tag)

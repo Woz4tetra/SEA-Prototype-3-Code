@@ -4,20 +4,14 @@ import numpy as np
 from atlasbuggy import Orchestrator, Node, run
 
 from data_processing.experiment_helpers.plot_helpers import *
-from data_processing.experiment_helpers.k_calculator_helpers import compute_k, format_abs_enc_ticks
+from data_processing.experiment_helpers.k_calculator_helpers import *
 from data_processing.hardware_playback import *
 from data_processing.torque_table import TorqueTable
-
-rel_enc_ticks_to_rad = 2 * math.pi / 2000.0
-motor_enc_ticks_to_rad = 2 * math.pi / (131.25 * 64)
-abs_gear_ratio = 48.0 / 32.0
-abs_ticks_per_rotation = 1024.0
-abs_enc_ticks_to_rad = 2 * math.pi / abs_ticks_per_rotation * abs_gear_ratio
 
 
 class DataAggregator(Node):
     def __init__(self, torque_table_path, filename, directory, conical_annulus_size, save_figures=True, enabled=True,
-                 enable_smoothing=False, use_abs_encoders=False):
+                 enable_smoothing=False, use_abs_encoders=False, abs_encoder_fixed_diff=0.0):
         super(DataAggregator, self).__init__(enabled)
 
         self.torque_table = TorqueTable(torque_table_path)
@@ -27,6 +21,7 @@ class DataAggregator(Node):
         self.save_figures = save_figures
         self.enable_smoothing = enable_smoothing
         self.use_abs_encoders = use_abs_encoders
+        self.abs_encoder_fixed_diff = abs_encoder_fixed_diff
 
         self.brake_tag = "brake"
         self.brake_sub = self.define_subscription(self.brake_tag, message_type=packet.Packet,
@@ -117,8 +112,9 @@ class DataAggregator(Node):
 
     async def teardown(self):
         formatted_abs_enc_1_ticks = format_abs_enc_ticks(self.abs_encoder_1_ticks, abs_ticks_per_rotation, 0.0)
-        formatted_abs_enc_2_ticks = format_abs_enc_ticks(self.abs_encoder_2_ticks, abs_ticks_per_rotation, 274.0)
+        formatted_abs_enc_2_ticks = format_abs_enc_ticks(self.abs_encoder_2_ticks, abs_ticks_per_rotation, self.abs_encoder_fixed_diff)
 
+        session_epoch = self.encoder_timestamps[0]
         self.encoder_timestamps = np.array(self.encoder_timestamps)
         formatted_abs_enc_1_ticks = np.array(formatted_abs_enc_1_ticks)
         formatted_abs_enc_2_ticks = np.array(formatted_abs_enc_2_ticks)
@@ -129,8 +125,15 @@ class DataAggregator(Node):
         self.brake_timestamps = np.array(self.brake_timestamps)
         self.brake_current = np.array(self.brake_current)
 
+        self.encoder_timestamps -= session_epoch
+        self.brake_timestamps -= session_epoch
+        self.experiment_start_time -= session_epoch
+        self.experiment_stop_time -= session_epoch
+        self.motor_direction_switch_time -= session_epoch
+
         basklash_time_compensation = 2.0
-        exp_start_index = (np.abs(self.encoder_timestamps - (self.experiment_start_time + basklash_time_compensation))).argmin()
+        exp_start_index = (
+            np.abs(self.encoder_timestamps - (self.experiment_start_time + basklash_time_compensation))).argmin()
 
         formatted_abs_enc_1_ticks = formatted_abs_enc_1_ticks - formatted_abs_enc_1_ticks[exp_start_index]
         formatted_abs_enc_2_ticks = formatted_abs_enc_2_ticks - formatted_abs_enc_2_ticks[exp_start_index]
@@ -170,9 +173,12 @@ class DataAggregator(Node):
         plt.axvline(self.experiment_stop_time, color="black")
         plt.legend()
         if self.save_figures:
-            save_fig("%s/%s-%s/%s/encoder_data_comp" % (self.conical_annulus_size, self.log_directory, self.log_filename, enc_type_dir_name))
+            save_fig("%s/%s-%s/%s/encoder_data_comp" % (
+            self.conical_annulus_size, self.log_directory, self.log_filename, enc_type_dir_name))
 
-        # new_fig()
+        new_fig()
+        plt.plot(self.encoder_timestamps, self.diff_encoder_1_ticks, '.')
+        plt.plot(self.encoder_timestamps, self.diff_encoder_2_ticks, '.')
         # plt.plot(result.encoder_timestamps, formatted_abs_enc_1_ticks, '.')
         # plt.plot(result.encoder_timestamps, formatted_abs_enc_2_ticks, '.')
         # plt.plot(result.encoder_timestamps, diff_enc_delta, '.')
@@ -187,7 +193,8 @@ class DataAggregator(Node):
         plt.axvline(self.experiment_stop_time, color="black")
         plt.legend()
         if self.save_figures:
-            save_fig("%s/%s-%s/%s/raw_encoder_data" % (self.conical_annulus_size, self.log_directory, self.log_filename, enc_type_dir_name))
+            save_fig("%s/%s-%s/%s/raw_encoder_data" % (
+            self.conical_annulus_size, self.log_directory, self.log_filename, enc_type_dir_name))
 
         new_fig()
         plt.title("Raw Brake Data")
@@ -200,7 +207,8 @@ class DataAggregator(Node):
         plt.axvline(self.experiment_start_time, color="black")
         plt.axvline(self.experiment_stop_time, color="black")
         if self.save_figures:
-            save_fig("%s/%s-%s/%s/raw_brake_data" % (self.conical_annulus_size, self.log_directory, self.log_filename, enc_type_dir_name))
+            save_fig("%s/%s-%s/%s/raw_brake_data" % (
+            self.conical_annulus_size, self.log_directory, self.log_filename, enc_type_dir_name))
 
         if result.brake_torque_nm is not None:
             new_fig()
@@ -214,7 +222,8 @@ class DataAggregator(Node):
             plt.legend()
             if self.save_figures:
                 save_fig(
-                    "%s/%s-%s/%s/torque_vs_angle" % (self.conical_annulus_size, self.log_directory, self.log_filename, enc_type_dir_name))
+                    "%s/%s-%s/%s/torque_vs_angle" % (
+                    self.conical_annulus_size, self.log_directory, self.log_filename, enc_type_dir_name))
 
         plt.show()
 
@@ -233,12 +242,14 @@ class PlaybackOrchestrator(Orchestrator):
         # conical_annulus_size = "0.5x1.0x0.365"
         # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
         # enable_smoothing = False
+        # abs_encoder_fixed_diff = 274.0
 
         # filename = "23_45_11.log"
         # directory = "2018_Nov_06"
         # conical_annulus_size = "0.5x1.0x0.365"
         # torque_table_path = "brake_torque_data/B5Z Torque Table.csv"
         # enable_smoothing = True
+        # abs_encoder_fixed_diff = 274.0
 
         # broken data
         # filename = "23_25_50.log"
@@ -246,6 +257,7 @@ class PlaybackOrchestrator(Orchestrator):
         # conical_annulus_size = "0.25x1.25x0.49"
         # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
         # enable_smoothing = True
+        # abs_encoder_fixed_diff = 274.0
 
         # broken data
         # filename = "22_57_03.log"
@@ -253,18 +265,44 @@ class PlaybackOrchestrator(Orchestrator):
         # conical_annulus_size = "0.75x1.75x0.725"
         # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
         # enable_smoothing = True
+        # abs_encoder_fixed_diff = 274.0
 
         # filename = "20_57_43.log"
         # directory = "2019_Jan_07"
         # conical_annulus_size = "0.75x1.75x0.725"
         # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
         # enable_smoothing = True
+        # abs_encoder_fixed_diff = 274.0
 
-        filename = "22_33_12.log"
-        directory = "2019_Jan_07"
-        conical_annulus_size = "1.5x1.75x0.725"
+        # filename = "22_33_12.log"
+        # directory = "2019_Jan_07"
+        # conical_annulus_size = "1.5x1.75x0.725"
+        # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        # enable_smoothing = True
+        # abs_encoder_fixed_diff = 274.0
+
+        # broken encoder 1
+        # filename = "00_40_48.log"
+        # directory = "2019_Mar_01"
+        # conical_annulus_size = "15x30x9mm with inserts"
+        # torque_table_path = "brake_torque_data/B15 Torque Table.csv"
+        # enable_smoothing = False
+        # abs_encoder_fixed_diff = 259.0
+
+        filename = "22_08_46.log"
+        directory = "2019_Mar_01"
+        conical_annulus_size = "15x30x9mm with inserts"
         torque_table_path = "brake_torque_data/B15 Torque Table.csv"
         enable_smoothing = True
+        abs_encoder_fixed_diff = 259.0
+
+        # torque range too low for meaningful data
+        # filename = "23_23_22.log"
+        # directory = "2019_Mar_01"
+        # conical_annulus_size = "15x30x9mm with inserts"
+        # torque_table_path = "brake_torque_data/B5Z Torque Table.csv"
+        # enable_smoothing = False
+        # abs_encoder_fixed_diff = 259.0
 
         self.brake = BrakePlayback(filename, directory)
         self.motor = MotorPlayback(filename, directory)
@@ -272,7 +310,8 @@ class PlaybackOrchestrator(Orchestrator):
         self.experiment = ExperimentPlayback(filename, directory)
         self.aggregator = DataAggregator(
             torque_table_path, filename, directory, conical_annulus_size,
-            save_figures=save_figures, enabled=True, enable_smoothing=enable_smoothing, use_abs_encoders=use_abs_encoders
+            save_figures=save_figures, enabled=True, enable_smoothing=enable_smoothing,
+            use_abs_encoders=use_abs_encoders, abs_encoder_fixed_diff=abs_encoder_fixed_diff
         )
 
         # self.add_nodes(self.brake, self.motor, self.encoders, self.experiment)

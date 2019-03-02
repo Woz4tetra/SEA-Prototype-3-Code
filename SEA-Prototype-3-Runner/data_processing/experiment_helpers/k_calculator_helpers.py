@@ -20,6 +20,13 @@ ResultInfo = namedtuple(
 )
 
 
+rel_enc_ticks_to_rad = 2 * math.pi / 2000.0
+motor_enc_ticks_to_rad = 2 * math.pi / (131.25 * 64)
+abs_gear_ratio = 48.0 / 32.0
+abs_ticks_per_rotation = 1024.0
+abs_enc_ticks_to_rad = 2 * math.pi / abs_ticks_per_rotation * abs_gear_ratio
+
+
 def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     try:
         window_size = np.abs(np.int(window_size))

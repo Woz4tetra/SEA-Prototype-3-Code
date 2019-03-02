@@ -88,9 +88,9 @@ class DataPlotter(Node):
         self.initial_val_enc_1 = None
         self.initial_val_enc_2 = None
 
-        self.rel_enc_ticks_to_rad = default_rel_enc_ticks_to_rad
-        self.motor_enc_ticks_to_rad = default_motor_enc_ticks_to_rad
-        self.abs_gear_ratio = default_abs_gear_ratio
+        self.rel_enc_ticks_to_rad = rel_enc_ticks_to_rad
+        self.motor_enc_ticks_to_rad = motor_enc_ticks_to_rad
+        self.abs_gear_ratio = abs_gear_ratio
 
         self.plt = None
         if self.enabled:

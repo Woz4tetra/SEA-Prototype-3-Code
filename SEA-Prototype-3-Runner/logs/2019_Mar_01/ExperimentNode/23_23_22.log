@@ -1,0 +1,11 @@
+[ExperimentNode @ factory.py:85][DEBUG] 2019-03-01 23:23:22,163: Logging to: logs/2019_Mar_01/ExperimentNode/23_23_22.log
+[ExperimentNode @ experiment_node.py:68][INFO] 2019-03-01 23:23:22,164: Experiment:
+	Step duration: 2.000000
+	Number of steps: 50
+	Approx. experiment duration: 400.000000
+	Torque step resolution: 0.000706
+	Torque range: 0.001059..0.035308 (forcing), 0.002189..0.035308 (unforcing)
+	Torque table path: brake_torque_data/B5Z Torque Table.csv
+[ExperimentNode @ node.py:92][INFO] 2019-03-01 23:23:28,000: setup
+[ExperimentNode @ node.py:106][INFO] 2019-03-01 23:30:33,710: Node took 431.5461871623993s to run
+[ExperimentNode @ node.py:101][INFO] 2019-03-01 23:30:33,710: teardown

@@ -1,0 +1,11 @@
+[MotorControllerBridge @ factory.py:85][DEBUG] 2019-03-01 22:08:46,505: Logging to: logs/2019_Mar_01/MotorControllerBridge/22_08_46.log
+[MotorControllerBridge @ motor_controller_bridge.py:24][DEBUG] 2019-03-01 22:08:52,108: Initializing...
+[MotorControllerBridge @ motor_controller_bridge.py:27][DEBUG] 2019-03-01 22:08:52,109: done!
+[MotorControllerBridge @ motor_controller_bridge.py:31][DEBUG] 2019-03-01 22:08:56,056: command: -444
+[MotorControllerBridge @ motor_controller_bridge.py:50][INFO] 2019-03-01 22:09:33,248: Executing motor command queue backlog
+[MotorControllerBridge @ motor_controller_bridge.py:31][DEBUG] 2019-03-01 22:09:33,248: command: -3200
+[MotorControllerBridge @ motor_controller_bridge.py:31][DEBUG] 2019-03-01 22:13:01,310: command: 3200
+[MotorControllerBridge @ motor_controller_bridge.py:31][DEBUG] 2019-03-01 22:16:29,376: command: 0
+[MotorControllerBridge @ motor_controller_bridge.py:72][INFO] 2019-03-01 22:16:29,377: Command queue backlog finished!
+[MotorControllerBridge @ node.py:106][INFO] 2019-03-01 22:16:30,204: Node took 463.69842004776s to run
+[MotorControllerBridge @ motor_controller_bridge.py:77][DEBUG] 2019-03-01 22:16:30,205: Tearing down

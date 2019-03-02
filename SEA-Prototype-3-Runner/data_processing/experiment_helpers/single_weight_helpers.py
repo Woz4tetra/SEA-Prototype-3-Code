@@ -1,5 +1,5 @@
 import numpy as np
-from .k_calculator_helpers import default_rel_enc_ticks_to_rad
+from .k_calculator_helpers import rel_enc_ticks_to_rad
 
 
 def single_weight_test(measurement_on_ruler_cm, actual_displacement, predicted_K, weight_used=True):
@@ -44,6 +44,6 @@ def average_sample(encoder_1_ticks, encoder_2_ticks):
     encoder_1_ticks = np.array(encoder_1_ticks)
     encoder_2_ticks = np.array(encoder_2_ticks)
     encoder_delta = encoder_1_ticks - encoder_2_ticks
-    encoder_delta_rad_avg = np.mean(encoder_delta) * default_rel_enc_ticks_to_rad
+    encoder_delta_rad_avg = np.mean(encoder_delta) * rel_enc_ticks_to_rad
 
     return encoder_delta_rad_avg
